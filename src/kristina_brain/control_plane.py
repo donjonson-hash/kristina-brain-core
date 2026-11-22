@@ -1,5 +1,5 @@
 """
-Commercial Cloud Control Plane MVP (v1.0.0) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
+Commercial Cloud Control Plane MVP (v1.0.1) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
 Запускается командой `brain-core-cloud` (требует `pip install 'kristina-brain-core[cloud]'`).
 
 Возможности платного контура ($29 Starter / $149 Pro):
@@ -77,10 +77,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
   <div class="toolbar">
     <input id="apiKey" type="password" placeholder="API Key (if enabled)" style="width:170px">
-    <input id="scopeId" type="text" value="tenant:acme-corp" placeholder="scope_id" style="width:180px">
+    <input id="scopeId" type="text" value="hermes:syndiai" placeholder="scope_id" style="width:180px">
     <button onclick="refreshAll()">Refresh Telemetry</button>
     <button class="secondary" onclick="triggerHeartbeat()">Run Heartbeat Tick</button>
-    <span class="badge" id="versionBadge">v1.0.0</span>
+    <span class="badge" id="versionBadge">v1.0.1</span>
   </div>
 </header>
 
@@ -228,7 +228,7 @@ def create_control_plane_app(
     """Создаёт экземпляр FastAPI приложения Cloud Control Plane."""
     try:
         from fastapi import Body, Depends, FastAPI, Header, HTTPException
-        from fastapi.responses import HTMLResponse
+        from fastapi.responses import HTMLResponse, RedirectResponse, Response
     except ImportError as exc:
         raise RuntimeError("FastAPI is required for Control Plane: pip install 'kristina-brain-core[cloud]'") from exc
 
@@ -251,7 +251,7 @@ def create_control_plane_app(
 
     app = FastAPI(
         title="Kristina Brain Engine — Cloud Control Plane",
-        version="1.0.0",
+        version="1.0.1",
         lifespan=lifespan,
     )
 
@@ -267,9 +267,17 @@ def create_control_plane_app(
         if not candidate or not hmac.compare_digest(candidate, expected_key):
             raise HTTPException(status_code=401, detail="Invalid or missing Control Plane API key")
 
+    @app.get("/", include_in_schema=False)
+    async def root_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/dashboard")
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        return Response(status_code=204)
+
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
-        return {"status": "ok", "version": "1.0.0"}
+        return {"status": "ok", "version": "1.0.1"}
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
