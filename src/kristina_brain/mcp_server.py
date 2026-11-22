@@ -77,6 +77,46 @@ MCP_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "brain_record_reply",
+        "description": "Validate an outgoing assistant reply against repeated-question guard and record open questions / proactive turn count.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["scope_id", "reply_id", "reply_text"],
+            "properties": {
+                "scope_id": {"type": "string"},
+                "reply_id": {"type": "string"},
+                "reply_text": {"type": "string"},
+                "is_proactive": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "brain_schedule_intention",
+        "description": "Schedule a durable background intention for a scope_id if no active intention is currently running.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["scope_id", "source_event_id", "kind", "topic"],
+            "properties": {
+                "scope_id": {"type": "string"},
+                "source_event_id": {"type": "string"},
+                "kind": {"type": "string"},
+                "topic": {"type": "string"},
+                "ttl_minutes": {"type": "integer", "minimum": 1, "maximum": 10080, "default": 45},
+            },
+        },
+    },
+    {
+        "name": "brain_list_intentions",
+        "description": "List durable background intentions and their statuses for a scope_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_id": {"type": "string", "default": "default"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 10},
+            },
+        },
+    },
+    {
         "name": "brain_shadow_summary",
         "description": "Return aggregated A/B divergence metrics between fast-only baseline and 12 slow organism modes.",
         "inputSchema": {
@@ -109,7 +149,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.5.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.6.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -183,6 +223,48 @@ class BrainMCPServer:
         if name == "brain_get_world_context":
             scope_id = str(args.get("scope_id", "default"))
             return await self.engine.get_world_context(scope_id)
+
+        if name == "brain_record_reply":
+            return await self.engine.record_assistant_reply(
+                scope_id=str(args["scope_id"]),
+                reply_id=str(args["reply_id"]),
+                reply_text=str(args["reply_text"]),
+                is_proactive=bool(args.get("is_proactive", False)),
+            )
+
+        if name == "brain_schedule_intention":
+            created = await self.engine.intentions.schedule(
+                scope_id=str(args["scope_id"]),
+                source_event_id=str(args["source_event_id"]),
+                kind=str(args["kind"]),
+                topic=str(args["topic"]),
+                ttl_minutes=int(args.get("ttl_minutes", 45)),
+            )
+            return {
+                "scheduled": created is not None,
+                "intention_id": created.intention_id if created else None,
+                "status": created.status if created else "busy_or_duplicate",
+            }
+
+        if name == "brain_list_intentions":
+            items = await self.engine.intentions.list_for_scope(
+                str(args.get("scope_id", "default")),
+                limit=int(args.get("limit", 10)),
+            )
+            return {
+                "intentions": [
+                    {
+                        "intention_id": it.intention_id,
+                        "kind": it.kind,
+                        "topic": it.topic,
+                        "status": it.status,
+                        "due_at": it.due_at.isoformat(),
+                        "result": it.result,
+                        "reason": it.reason,
+                    }
+                    for it in items
+                ]
+            }
 
         if name == "brain_shadow_summary":
             hours = int(args.get("window_hours", 24))

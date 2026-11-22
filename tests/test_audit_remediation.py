@@ -282,6 +282,9 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                         "brain_ingest_event",
                         "brain_decide_proactive",
                         "brain_get_world_context",
+                        "brain_record_reply",
+                        "brain_schedule_intention",
+                        "brain_list_intentions",
                         "brain_shadow_summary",
                     },
                 )
@@ -446,6 +449,88 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 tick_late = await engine.heartbeat_tick("tg:unawatuna", commit_proactive_send=False)
                 self.assertEqual(tick_late["effective_decision"]["action"], "none")
                 self.assertEqual(tick_late["effective_decision"]["reason"], "counterparty_quiet_hours")
+            finally:
+                await engine.shutdown()
+
+    async def test_v060_episodic_dialogue_gates_anti_repeat_and_durable_intentions(self) -> None:
+        """v0.6.0: Антиповтор вопросов, блокировка пинга при открытом вопросе и жизненный цикл Durable Intentions."""
+        profile = PersonaProfile(
+            persona_id="companion_v06",
+            display_name="Kristina",
+            timezone="Europe/Stockholm",
+            locale_city_label="Стокгольме",
+            traits=BigFiveTraits(extraversion=0.9, openness=0.9, neuroticism=0.1),
+            proactive_threshold=0.45,
+            proactive_cooldown_seconds=1800,
+            enable_slow_modes_in_decisions=True,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AsyncSQLiteStateStore(Path(tmp) / "v060.db")
+            clock = FixedClock(datetime(2026, 11, 22, 11, 0, tzinfo=UTC), "Europe/Stockholm")
+            engine = BrainEngine(store, profile=profile, clock=clock)
+            await engine.start()
+            try:
+                # 1. Входящее сообщение с высоким интересом автоматически создаёт DurableIntention
+                ing = await engine.ingest_message(
+                    scope_id="u:ocean",
+                    event_id="ev-10",
+                    user_input="Хочу построить автономного яхтенного навигатора на локальной LLM!",
+                    explicit_appraisal=Appraisal(
+                        reaction="curiosity",
+                        intensity=0.88,
+                        source_quote="автономного яхтенного навигатора",
+                        interest_action="open",
+                        topic="морская LLM-навигация",
+                        reflection="Очень интересная инженерная тема",
+                    ),
+                )
+                self.assertIsNotNone(ing["scheduled_intention_id"])
+
+                # 2. Захватываем намерение в работу и завершаем его с результатом
+                claimed = await engine.intentions.claim_next_planned("u:ocean")
+                self.assertIsNotNone(claimed)
+                assert claimed is not None
+                self.assertEqual(claimed.status, "running")
+                done = await engine.intentions.complete(
+                    claimed.intention_id,
+                    result={"summary": "Проверила офлайн-карты OpenSeaMap и NMEA 2000 поток"},
+                )
+                self.assertTrue(done)
+
+                # 3. Агент отвечает вопросом про волны -> повторный похожий вопрос отбивается!
+                r1 = await engine.record_assistant_reply(
+                    scope_id="u:ocean",
+                    reply_id="a-1",
+                    reply_text="Крутая идея! А волны ночью реально слышно из домика на берегу океана?",
+                    is_proactive=False,
+                )
+                self.assertTrue(r1["accepted"])
+
+                r_dup = await engine.record_assistant_reply(
+                    scope_id="u:ocean",
+                    reply_id="a-2",
+                    reply_text="Слушай, скажи: волны ночью реально слышно из домика на берегу океана?",
+                    is_proactive=True,
+                )
+                self.assertFalse(r_dup["accepted"])
+                self.assertEqual(r_dup["reason"], "repeated_question")
+
+                # 4. Пока пользователь не ответил на открытый вопрос a-1, проактивный тик заблокирован awaiting_answer!
+                clock.advance(hours=3)
+                tick_blocked = await engine.heartbeat_tick("u:ocean", commit_proactive_send=False)
+                self.assertEqual(tick_blocked["effective_decision"]["action"], "none")
+                self.assertEqual(tick_blocked["effective_decision"]["reason"], "awaiting_answer")
+
+                # 5. Пользователь отвечает -> вопрос закрывается в answered, блокировка снимается!
+                await engine.ingest_message(
+                    scope_id="u:ocean",
+                    event_id="ev-11",
+                    user_input="Да, прибой шумит всю ночь прямо под окнами!",
+                    explicit_appraisal=Appraisal("warmth", 0.8, "прибой шумит", "keep", "океан", "ответил"),
+                )
+                clock.advance(hours=3)
+                tick_unblocked = await engine.heartbeat_tick("u:ocean", commit_proactive_send=False)
+                self.assertEqual(tick_unblocked["effective_decision"]["action"], "message")
             finally:
                 await engine.shutdown()
 

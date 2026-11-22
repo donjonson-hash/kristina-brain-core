@@ -25,6 +25,7 @@ from typing import (
     runtime_checkable,
 )
 
+from .intentions import DurableIntention
 from .world import WorldStateAnchor
 
 T = TypeVar("T")
@@ -85,6 +86,25 @@ class StateStore(Protocol):
     # --- Якоря физического контекста и часового пояса собеседника (v0.5.0) ---
     async def get_world_anchor(self, scope_id: str) -> WorldStateAnchor: ...
     async def upsert_world_anchor(self, anchor: WorldStateAnchor) -> None: ...
+
+    # --- Эпизодическое состояние диалога и Durable Intentions (v0.6.0) ---
+    async def get_dialogue_state(self, scope_id: str) -> dict[str, Any] | None: ...
+    async def save_dialogue_state(self, scope_id: str, state: Mapping[str, Any]) -> None: ...
+    async def create_intention_if_free(self, intention: DurableIntention) -> bool: ...
+    async def expire_overdue_intentions(self, scope_id: str, now_iso: str) -> int: ...
+    async def claim_planned_intention(
+        self, scope_id: str, now_iso: str, run_due_iso: str
+    ) -> DurableIntention | None: ...
+    async def finish_intention(
+        self,
+        intention_id: str,
+        *,
+        status: str,
+        result: Mapping[str, Any] | None,
+        reason: str | None,
+        updated_at_iso: str,
+    ) -> bool: ...
+    async def list_intentions(self, scope_id: str, *, limit: int = 10) -> list[DurableIntention]: ...
 
     # --- Приватная Shadow-телеметрия решений без PII ---
     async def insert_shadow_telemetry_once(self, row: Mapping[str, Any]) -> bool: ...
@@ -250,6 +270,43 @@ class AsyncSQLiteStateStore:
                         updated_at TEXT NOT NULL
                     )
                     """
+                )
+
+                # 5c. Эпизодическое состояние диалога и открытых вопросов (v0.6.0)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS brain_dialogue_states (
+                        scope_id TEXT PRIMARY KEY,
+                        state_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+
+                # 5d. Устойчивые автономные намерения (Durable Intentions — v0.6.0)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS brain_durable_intentions (
+                        intention_id TEXT PRIMARY KEY,
+                        scope_id TEXT NOT NULL,
+                        source_event_id TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        topic TEXT NOT NULL,
+                        status TEXT NOT NULL CHECK (
+                            status IN ('planning','planned','running','completed','declined','failed','cancelled')
+                        ),
+                        created_at TEXT NOT NULL,
+                        due_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        plan_json TEXT,
+                        result_json TEXT,
+                        reason TEXT,
+                        UNIQUE (scope_id, source_event_id)
+                    )
+                    """
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_brain_intentions_scope_updated ON brain_durable_intentions(scope_id, updated_at DESC)"
                 )
 
                 # 6. Shadow Decision Telemetry (совместима со схемой shadow_telemetry.py)
@@ -696,3 +753,218 @@ class AsyncSQLiteStateStore:
                 raise
 
         await self._run(_op)
+
+    @staticmethod
+    def _decode_intention_row(row: sqlite3.Row) -> DurableIntention:
+        created = _parse_iso_utc(row["created_at"]) or datetime.now(UTC)
+        due = _parse_iso_utc(row["due_at"]) or created
+        updated = _parse_iso_utc(row["updated_at"]) or created
+        return DurableIntention(
+            intention_id=str(row["intention_id"]),
+            scope_id=str(row["scope_id"]),
+            source_event_id=str(row["source_event_id"]),
+            kind=str(row["kind"]),
+            topic=str(row["topic"]),
+            status=str(row["status"]),
+            created_at=created,
+            due_at=due,
+            updated_at=updated,
+            plan=json.loads(row["plan_json"]) if row["plan_json"] else None,
+            result=json.loads(row["result_json"]) if row["result_json"] else None,
+            reason=row["reason"],
+        )
+
+    async def get_dialogue_state(self, scope_id: str) -> dict[str, Any] | None:
+        def _op(conn: sqlite3.Connection) -> dict[str, Any] | None:
+            row = conn.execute(
+                "SELECT state_json FROM brain_dialogue_states WHERE scope_id = ?",
+                (scope_id,),
+            ).fetchone()
+            return json.loads(row["state_json"]) if row else None
+
+        return await self._run(_op)
+
+    async def save_dialogue_state(self, scope_id: str, state: Mapping[str, Any]) -> None:
+        payload = json.dumps(dict(state), ensure_ascii=False, allow_nan=False)
+        now_iso = datetime.now(UTC).isoformat()
+
+        def _op(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO brain_dialogue_states(scope_id, state_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(scope_id) DO UPDATE SET
+                        state_json = excluded.state_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (scope_id, payload, now_iso),
+                )
+                conn.execute("COMMIT;")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        await self._run(_op)
+
+    async def expire_overdue_intentions(self, scope_id: str, now_iso: str) -> int:
+        def _op(conn: sqlite3.Connection) -> int:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE brain_durable_intentions
+                    SET status = 'failed', reason = status || '_timeout', updated_at = ?
+                    WHERE scope_id = ? AND status IN ('planning', 'planned', 'running') AND due_at <= ?
+                    """,
+                    (now_iso, scope_id, now_iso),
+                )
+                conn.execute("COMMIT;")
+                return cur.rowcount
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        return await self._run(_op)
+
+    async def create_intention_if_free(self, intention: DurableIntention) -> bool:
+        plan_str = json.dumps(intention.plan, ensure_ascii=False) if intention.plan is not None else None
+
+        def _op(conn: sqlite3.Connection) -> bool:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                active = conn.execute(
+                    """
+                    SELECT 1 FROM brain_durable_intentions
+                    WHERE scope_id = ? AND status IN ('planning', 'planned', 'running')
+                    LIMIT 1
+                    """,
+                    (intention.scope_id,),
+                ).fetchone()
+                if active is not None:
+                    conn.execute("ROLLBACK;")
+                    return False
+
+                cur = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO brain_durable_intentions(
+                        intention_id, scope_id, source_event_id, kind, topic, status,
+                        created_at, due_at, updated_at, plan_json, result_json, reason
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                    """,
+                    (
+                        intention.intention_id,
+                        intention.scope_id,
+                        intention.source_event_id,
+                        intention.kind,
+                        intention.topic,
+                        intention.status,
+                        intention.created_at.isoformat(),
+                        intention.due_at.isoformat(),
+                        intention.updated_at.isoformat(),
+                        plan_str,
+                    ),
+                )
+                conn.execute("COMMIT;")
+                return cur.rowcount == 1
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        return await self._run(_op)
+
+    async def claim_planned_intention(self, scope_id: str, now_iso: str, run_due_iso: str) -> DurableIntention | None:
+        def _op(conn: sqlite3.Connection) -> DurableIntention | None:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                running = conn.execute(
+                    "SELECT 1 FROM brain_durable_intentions WHERE scope_id = ? AND status = 'running' LIMIT 1",
+                    (scope_id,),
+                ).fetchone()
+                if running is not None:
+                    conn.execute("ROLLBACK;")
+                    return None
+
+                cand = conn.execute(
+                    """
+                    SELECT * FROM brain_durable_intentions
+                    WHERE scope_id = ? AND status = 'planned'
+                    ORDER BY created_at ASC LIMIT 1
+                    """,
+                    (scope_id,),
+                ).fetchone()
+                if cand is None:
+                    conn.execute("ROLLBACK;")
+                    return None
+
+                conn.execute(
+                    """
+                    UPDATE brain_durable_intentions
+                    SET status = 'running', due_at = ?, updated_at = ?
+                    WHERE intention_id = ?
+                    """,
+                    (run_due_iso, now_iso, cand["intention_id"]),
+                )
+                updated_row = conn.execute(
+                    "SELECT * FROM brain_durable_intentions WHERE intention_id = ?",
+                    (cand["intention_id"],),
+                ).fetchone()
+                conn.execute("COMMIT;")
+                return self._decode_intention_row(updated_row) if updated_row else None
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        return await self._run(_op)
+
+    async def finish_intention(
+        self,
+        intention_id: str,
+        *,
+        status: str,
+        result: Mapping[str, Any] | None,
+        reason: str | None,
+        updated_at_iso: str,
+    ) -> bool:
+        res_str = json.dumps(dict(result), ensure_ascii=False) if result is not None else None
+
+        def _op(conn: sqlite3.Connection) -> bool:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                cur = conn.execute(
+                    """
+                    UPDATE brain_durable_intentions
+                    SET status = ?, result_json = ?, reason = ?, updated_at = ?
+                    WHERE intention_id = ?
+                    """,
+                    (status, res_str, reason, updated_at_iso, intention_id),
+                )
+                conn.execute("COMMIT;")
+                return cur.rowcount == 1
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        return await self._run(_op)
+
+    async def list_intentions(self, scope_id: str, *, limit: int = 10) -> list[DurableIntention]:
+        def _op(conn: sqlite3.Connection) -> list[DurableIntention]:
+            rows = conn.execute(
+                """
+                SELECT * FROM brain_durable_intentions
+                WHERE scope_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (scope_id, int(limit)),
+            ).fetchall()
+            return [self._decode_intention_row(r) for r in rows]
+
+        return await self._run(_op)

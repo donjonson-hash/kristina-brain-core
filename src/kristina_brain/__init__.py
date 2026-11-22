@@ -13,8 +13,10 @@ from .autonomy import (
     evaluate_with_shadow,
 )
 from .clock import ClockProvider, FixedClock, SystemClock
+from .dialogue import dialogue_proactive_block_reason, is_repeated_question
 from .emotions import FAST_STATE_KEYS, AsyncEmotionalCore, EmotionalEvent
 from .engine import BrainEngine
+from .intentions import DurableIntention, DurableIntentionEngine
 from .llm_provider import (
     FailoverLLMProvider,
     HTTPXChatCompletionsProvider,
@@ -66,10 +68,14 @@ __all__ = [
     "evaluate_with_shadow",
     "AsyncShadowTelemetryStore",
     "BrainEngine",
+    "DurableIntention",
+    "DurableIntentionEngine",
+    "dialogue_proactive_block_reason",
+    "is_repeated_question",
     "ResponsePacing",
     "ResponsePacingEngine",
     "WorldStateAnchor",
     "resolve_iana_timezone",
 ]
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

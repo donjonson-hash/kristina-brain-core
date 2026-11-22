@@ -20,7 +20,15 @@ from .autonomy import (
     evaluate_with_shadow,
 )
 from .clock import ClockProvider, SystemClock
+from .dialogue import (
+    apply_assistant_turn,
+    apply_user_turn,
+    dialogue_proactive_block_reason,
+    empty_dialogue_state,
+    is_repeated_question,
+)
 from .emotions import AsyncEmotionalCore, EmotionalEvent
+from .intentions import DurableIntentionEngine
 from .llm_provider import LLMProvider
 from .modes import AsyncOrganismModes
 from .pacing import ResponsePacingEngine
@@ -62,6 +70,7 @@ class BrainEngine:
             min_delay_seconds=profile.pacing_min_delay_seconds,
             max_delay_seconds=profile.pacing_max_delay_seconds,
         )
+        self.intentions = DurableIntentionEngine(store, clock=self.clock)
         self.shadow_telemetry = AsyncShadowTelemetryStore(store)
 
     async def start(self) -> None:
@@ -147,6 +156,25 @@ class BrainEngine:
                 )
                 await self.store.upsert_world_anchor(anchor)
 
+        dialogue_state = await self.store.get_dialogue_state(scope_id) or empty_dialogue_state()
+        scheduled_intention = None
+        if fast_state.get("event_applied", False):
+            dialogue_state = apply_user_turn(
+                dialogue_state,
+                event_id=event_id,
+                user_input=user_input,
+                at=utc_now,
+            )
+            await self.store.save_dialogue_state(scope_id, dialogue_state)
+            if appraisal is not None and appraisal.interest_action == "open" and appraisal.intensity >= 0.6:
+                scheduled_intention = await self.intentions.schedule(
+                    scope_id=scope_id,
+                    source_event_id=event_id,
+                    kind="topic_followup",
+                    topic=appraisal.topic,
+                    plan={"source_quote": appraisal.source_quote, "reaction": appraisal.reaction},
+                )
+
         if fast_state.get("event_applied", False):
             await self.store.upsert_proactive_schedule(
                 ProactiveScheduleRecord(
@@ -165,9 +193,12 @@ class BrainEngine:
             agent_city_label=self.profile.locale_city_label,
             counterparty_quiet_hours=self.profile.counterparty_night_hours,
         )
-        if dual_clock["prompt_line"]:
+        recent_intentions_list = await self.intentions.list_for_scope(scope_id, limit=3)
+        intention_line = self.intentions.format_prompt_context(recent_intentions_list)
+        extra_lines = [x for x in (dual_clock["prompt_line"], intention_line) if x]
+        if extra_lines:
             fast_state = dict(fast_state)
-            fast_state["for_llm"] = f"{fast_state['for_llm']} {dual_clock['prompt_line']}"
+            fast_state["for_llm"] = f"{fast_state['for_llm']} {' '.join(extra_lines)}"
 
         pacing = self.pacing_engine.calculate(fast_state, user_input_length=len(user_input))
         dominant_modes = await self.modes.dominant(scope_id, limit=3)
@@ -201,6 +232,8 @@ class BrainEngine:
                 "environment_cues": list(anchor.environment_cues),
                 **dual_clock,
             },
+            "dialogue_state": dialogue_state,
+            "scheduled_intention_id": scheduled_intention.intention_id if scheduled_intention else None,
             "dominant_modes": [
                 {"name": m.name, "amplitude": m.amplitude, "baseline": m.baseline, "deviation": m.deviation}
                 for m in dominant_modes
@@ -216,6 +249,8 @@ class BrainEngine:
         utc_now = self.clock.now_utc()
         schedule = await self.store.get_proactive_schedule(scope_id)
         anchor = await self.store.get_world_anchor(scope_id)
+        dialogue_state = await self.store.get_dialogue_state(scope_id)
+        dialogue_block = dialogue_proactive_block_reason(dialogue_state, utc_now)
 
         hours_since_contact = (
             max(0.0, (utc_now - schedule.last_user_activity).total_seconds() / 3600.0)
@@ -268,6 +303,13 @@ class BrainEngine:
         effective: AutonomousDecision = (
             report.shadow if self.profile.enable_slow_modes_in_decisions else report.baseline
         )
+        if dialogue_block is not None and effective.action == "message":
+            effective = AutonomousDecision(
+                action="none",
+                intention=None,
+                score=0.0,
+                reason=dialogue_block,
+            )
 
         if commit_proactive_send and effective.action == "message":
             new_intentions = tuple(list(schedule.recent_intentions[-9:]) + [effective.intention or "talk"])
@@ -306,4 +348,45 @@ class BrainEngine:
                 "shifted_modes": list(projection.shifted_modes),
             },
             "fast_state_for_llm": for_llm,
+        }
+
+    async def record_assistant_reply(
+        self,
+        *,
+        scope_id: str,
+        reply_id: str,
+        reply_text: str,
+        is_proactive: bool = False,
+        pause_hours: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Проверяет кандидат ответа/проактивного пинга на повтор уже заданного вопроса
+        и фиксирует ход агента в эпизодическом состоянии диалога.
+        """
+        utc_now = self.clock.now_utc()
+        state = await self.store.get_dialogue_state(scope_id) or empty_dialogue_state()
+        repeated = is_repeated_question(reply_text, state)
+        if repeated:
+            return {
+                "accepted": False,
+                "reason": "repeated_question",
+                "pending_question": state.get("pending_question"),
+            }
+        updated = apply_assistant_turn(
+            state,
+            reply_id=reply_id,
+            reply_text=reply_text,
+            at=utc_now,
+            is_proactive=is_proactive,
+        )
+        if pause_hours is not None and pause_hours > 0:
+            from datetime import timedelta as _td
+
+            updated["pause_until"] = (utc_now + _td(hours=pause_hours)).isoformat()
+        await self.store.save_dialogue_state(scope_id, updated)
+        return {
+            "accepted": True,
+            "reason": "recorded",
+            "pending_question": updated.get("pending_question"),
+            "proactive_since_user": updated.get("proactive_since_user", 0),
         }

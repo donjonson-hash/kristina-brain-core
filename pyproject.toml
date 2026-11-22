@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kristina-brain-core"
-version = "0.5.0"
+version = "0.6.0"
 description = "Dual-timescale affective state, cognitive appraisal, proactive silence policy, and PII-free shadow telemetry engine for autonomous AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
