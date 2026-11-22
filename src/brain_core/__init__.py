@@ -1,0 +1,61 @@
+"""
+Kristina / SomaCore Brain Engine — выделенное асинхронное ядро состояния,
+когнитивной оценки, 12 медленных мод, политики проактивности и shadow-телеметрии.
+Нулевая зависимость от python-telegram-bot.
+"""
+
+from .appraisal import Appraisal, CognitiveAppraiser
+from .autonomy import (
+    AutonomousDecision,
+    DecisionEngine,
+    DesireEngine,
+    ShadowDecisionReport,
+    evaluate_with_shadow,
+)
+from .clock import ClockProvider, FixedClock, SystemClock
+from .emotions import FAST_STATE_KEYS, AsyncEmotionalCore, EmotionalEvent
+from .engine import BrainEngine
+from .llm_provider import HTTPXChatCompletionsProvider, LLMProvider, LLMProviderError
+from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
+from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
+from .shadow import AsyncShadowTelemetryStore
+from .state_store import (
+    AsyncSQLiteStateStore,
+    ProactiveScheduleRecord,
+    StateStore,
+)
+
+__all__ = [
+    "ClockProvider",
+    "SystemClock",
+    "FixedClock",
+    "PersonaProfile",
+    "BigFiveTraits",
+    "ModeSpec",
+    "DEFAULT_KRISTINA_PROFILE",
+    "LLMProvider",
+    "HTTPXChatCompletionsProvider",
+    "LLMProviderError",
+    "StateStore",
+    "AsyncSQLiteStateStore",
+    "ProactiveScheduleRecord",
+    "EmotionalEvent",
+    "AsyncEmotionalCore",
+    "FAST_STATE_KEYS",
+    "ModeDefinition",
+    "ModeState",
+    "OrganismProjection",
+    "AsyncOrganismModes",
+    "DEFAULT_MODE_DEFINITIONS",
+    "Appraisal",
+    "CognitiveAppraiser",
+    "AutonomousDecision",
+    "ShadowDecisionReport",
+    "DesireEngine",
+    "DecisionEngine",
+    "evaluate_with_shadow",
+    "AsyncShadowTelemetryStore",
+    "BrainEngine",
+]
+
+__version__ = "0.2.0"
