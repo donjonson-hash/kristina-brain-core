@@ -69,10 +69,16 @@ DEFAULT_MODE_DEFINITIONS: Mapping[str, ModeDefinition] = {
 
 # Отображение реакций/видов событий на сдвиги медленных мод
 EVENT_KIND_DELTAS: Mapping[str, Mapping[str, float]] = {
-    "warmth": {"empathy_963": 0.06, "abandonment_wound": -0.04, "invisibility_wound": -0.05},
+    "warmth": {
+        "empathy_963": 0.08,
+        "abandonment_wound": -0.08,
+        "invisibility_wound": -0.06,
+        "withdrawal_147": -0.08,
+        "crisis_957": -0.06,
+    },
     "curiosity": {"creativity_357": 0.05, "agency_exec": 0.04, "aesthetic_drive": 0.03},
     "concern": {"empathy_963": 0.05, "crisis_957": 0.04, "self_critique": 0.03},
-    "frustration": {"social_overload": 0.09, "withdrawal_147": 0.07, "crisis_957": 0.06},
+    "frustration": {"social_overload": 0.12, "withdrawal_147": 0.14, "crisis_957": 0.12, "abandonment_wound": 0.10},
     "ignored_outreach": {"invisibility_wound": 0.08, "withdrawal_147": 0.06, "validation_need": 0.04},
     "dense_burst": {"social_overload": 0.10, "withdrawal_147": 0.05},
     "neutral": {"social_overload": 0.01},
@@ -234,34 +240,29 @@ class AsyncOrganismModes:
         def d(key: str) -> float:
             return devs.get(key, 0.0)
 
-        talk_bias = round(
-            0.35 * d("empathy_963")
-            + 0.25 * d("validation_need")
-            - 0.45 * d("social_overload")
-            - 0.40 * d("withdrawal_147"),
-            4,
+        # Конфликтно-защитный тормоз (долгая память ссоры через abandonment_wound t1/2=336h + withdrawal_147)
+        conflict_brake = (
+            1.15 * max(0.0, d("social_overload"))
+            + 1.35 * max(0.0, d("withdrawal_147"))
+            + 1.40 * max(0.0, d("crisis_957"))
+            + 1.60 * max(0.0, d("abandonment_wound"))
         )
+        rapport_boost = 0.85 * max(0.0, d("empathy_963")) + 0.55 * max(0.0, d("agency_exec"))
+
+        talk_bias = round(rapport_boost + 0.25 * d("validation_need") - conflict_brake, 4)
         share_bias = round(
-            0.40 * d("creativity_357")
-            + 0.30 * d("aesthetic_drive")
-            + 0.25 * d("agency_exec")
-            - 0.35 * d("self_critique"),
+            0.65 * d("creativity_357")
+            + 0.45 * d("aesthetic_drive")
+            + 0.45 * d("agency_exec")
+            - 0.45 * d("self_critique")
+            - 0.85 * conflict_brake,
             4,
         )
         ask_bias = round(
-            0.30 * d("agency_exec")
-            + 0.25 * d("empathy_963")
-            - 0.35 * d("invisibility_wound")
-            - 0.30 * d("social_overload"),
+            0.60 * d("agency_exec") + 0.50 * d("empathy_963") - 0.55 * d("invisibility_wound") - 0.90 * conflict_brake,
             4,
         )
-        be_alone_bias = round(
-            0.55 * d("social_overload")
-            + 0.50 * d("withdrawal_147")
-            + 0.35 * d("crisis_957")
-            + 0.25 * d("invisibility_wound"),
-            4,
-        )
+        be_alone_bias = round(conflict_brake + 0.35 * max(0.0, d("invisibility_wound")), 4)
 
         shifted = tuple(sorted(name for name, val in devs.items() if abs(val) >= 0.03))
         return OrganismProjection(

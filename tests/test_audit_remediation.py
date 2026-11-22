@@ -339,6 +339,72 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dead.calls, 1)
         self.assertEqual(backup.calls, 4)
 
+    async def test_b2b_conflict_brake_blocks_angry_client_and_recovers_after_resolution(self) -> None:
+        """v0.4: 12 медленных мод блокируют проактивный пинг злого клиента (wants_space), пропускают тёплого и восстанавливаются после примирения."""
+        base_profile = PersonaProfile.from_json_file("profiles/b2b_csm_profile.json")
+        profile = PersonaProfile(
+            persona_id=base_profile.persona_id,
+            display_name=base_profile.display_name,
+            timezone=base_profile.timezone,
+            locale_city_label=base_profile.locale_city_label,
+            night_hours=base_profile.night_hours,
+            traits=base_profile.traits,
+            proactive_threshold=0.52,
+            proactive_cooldown_seconds=base_profile.proactive_cooldown_seconds,
+            enable_slow_modes_in_decisions=True,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AsyncSQLiteStateStore(Path(tmp) / "b2b.db")
+            clock = FixedClock(datetime(2026, 11, 2, 9, 0, tzinfo=UTC), "Europe/Berlin")
+            engine = BrainEngine(store, profile=profile, clock=clock)
+            await engine.start()
+            try:
+                # Тёплый клиент vs разгневанный клиент vs холодный клиент
+                await engine.ingest_message(
+                    scope_id="acme",
+                    event_id="e1",
+                    user_input="Отличный онбординг!",
+                    explicit_appraisal=Appraisal("warmth", 0.85, "Отличный", "keep", "onboarding", "ok"),
+                )
+                await engine.ingest_message(
+                    scope_id="globex",
+                    event_id="g1",
+                    user_input="Прод лежит!",
+                    explicit_appraisal=Appraisal("frustration", 1.0, "Прод лежит", "open", "outage", "angry"),
+                )
+                await engine.ingest_message(
+                    scope_id="initech",
+                    event_id="i1",
+                    user_input="Ок, посмотрим позже",
+                    explicit_appraisal=Appraisal("neutral", 0.3, "Ок", "keep", "ack", "cold"),
+                )
+
+                clock.advance(hours=24)
+                await engine.ingest_message(
+                    scope_id="acme",
+                    event_id="e2",
+                    user_input="Как подключить Enterprise SSO?",
+                    explicit_appraisal=Appraisal("curiosity", 0.85, "SSO", "open", "sso", "upsell"),
+                )
+                await engine.ingest_message(
+                    scope_id="globex",
+                    event_id="g2",
+                    user_input="Не вздумайте слать чекины, мы уходим!",
+                    explicit_appraisal=Appraisal("frustration", 0.95, "уходим", "open", "churn", "furious"),
+                )
+
+                clock.advance(hours=52)
+                t_acme = await engine.heartbeat_tick("acme", commit_proactive_send=True)
+                t_glob = await engine.heartbeat_tick("globex", commit_proactive_send=True)
+                t_init = await engine.heartbeat_tick("initech", commit_proactive_send=True)
+
+                self.assertEqual(t_acme["effective_decision"]["action"], "message")
+                self.assertEqual(t_glob["effective_decision"]["action"], "none")
+                self.assertEqual(t_glob["effective_decision"]["reason"], "wants_space")
+                self.assertEqual(t_init["effective_decision"]["action"], "none")
+            finally:
+                await engine.shutdown()
+
 
 if __name__ == "__main__":
     unittest.main()

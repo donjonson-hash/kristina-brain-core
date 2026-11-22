@@ -52,14 +52,17 @@ class DesireEngine:
         irritation = float(vec.get("irritation", 0.1))
         anxiety = float(vec.get("anxiety", 0.2))
 
+        happiness = float(vec.get("happiness", 0.5))
         ctx = context or {}
         hours_since = float(ctx.get("hours_since_contact", 0.0))
-        contact_factor = min(0.30, max(0.0, (hours_since - 1.5) * 0.03))
+        # Пауза усиливает желание написать ТОЛЬКО при хорошем раппорте/вовлечённости (happiness/curiosity > 0.55)
+        rapport_gate = max(0.25, min(1.0, (happiness - 0.35) * 1.4))
+        contact_factor = min(0.22, max(0.0, (hours_since - 2.0) * 0.015)) * rapport_gate
 
-        talk = 0.45 * loneliness + 0.30 * energy + contact_factor - 0.35 * irritation
-        share = 0.50 * creativity + 0.25 * energy + 0.15 * loneliness - 0.25 * anxiety
-        ask = 0.55 * curiosity + 0.20 * energy + 0.5 * contact_factor - 0.30 * irritation
-        be_alone = 0.50 * irritation + 0.35 * anxiety + 0.30 * (1.0 - energy)
+        talk = 0.38 * loneliness + 0.22 * energy + 0.18 * max(0.0, happiness - 0.5) + contact_factor - 0.45 * irritation
+        share = 0.46 * creativity + 0.20 * energy + 0.12 * loneliness - 0.30 * anxiety
+        ask = 0.52 * curiosity + 0.18 * energy + 0.6 * contact_factor - 0.35 * irritation
+        be_alone = 0.55 * irritation + 0.38 * anxiety + 0.25 * (1.0 - energy)
 
         proj: OrganismProjection | None = ctx.get("organism_projection")
         if isinstance(proj, OrganismProjection):
