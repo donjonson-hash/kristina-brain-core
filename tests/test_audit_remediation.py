@@ -724,7 +724,8 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
 
-                # 3. Не-LLM импульс тепла + паузы пробивает моторный шлюз gate_proactive_outreach!
+                # 3. Спустя 35 минут (после рефрактерного окна) импульс тепла + паузы пробивает gate_proactive_outreach!
+                clock.advance(minutes=35)
                 pulse_ok = await engine.pulse_synapses(
                     "writer:1",
                     {"sensor_warmth": 0.9, "sensor_silence_window": 0.85},
