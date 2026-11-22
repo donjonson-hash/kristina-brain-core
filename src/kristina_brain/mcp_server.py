@@ -144,6 +144,29 @@ MCP_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "brain_pulse_synapses",
+        "description": "Fire deterministic non-LLM sensory stimuli into the synaptic network and return neurotransmitter levels and opened motor gates.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["scope_id", "stimuli"],
+            "properties": {
+                "scope_id": {"type": "string"},
+                "stimuli": {"type": "object"},
+            },
+        },
+    },
+    {
+        "name": "brain_sleep_consolidate",
+        "description": "Run nightly Hebbian synaptic plasticity, slow baseline drift, and REM dream-seed extraction for a scope_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_id": {"type": "string", "default": "default"},
+                "reward_signal": {"type": "number", "minimum": -1.0, "maximum": 1.0, "default": 0.0},
+            },
+        },
+    },
+    {
         "name": "brain_shadow_summary",
         "description": "Return aggregated A/B divergence metrics between fast-only baseline and 12 slow organism modes.",
         "inputSchema": {
@@ -176,7 +199,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "1.0.1"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "1.1.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -325,6 +348,17 @@ class BrainMCPServer:
                     for a in arts
                 ]
             }
+
+        if name == "brain_pulse_synapses":
+            raw_stim = args.get("stimuli") or {}
+            stim_clean = {str(k): float(v) for k, v in raw_stim.items()} if isinstance(raw_stim, dict) else {}
+            return await self.engine.pulse_synapses(str(args["scope_id"]), stim_clean)
+
+        if name == "brain_sleep_consolidate":
+            return await self.engine.run_sleep_consolidation(
+                str(args.get("scope_id", "default")),
+                reward_signal=float(args.get("reward_signal", 0.0)),
+            )
 
         if name == "brain_shadow_summary":
             hours = int(args.get("window_hours", 24))

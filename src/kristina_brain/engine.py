@@ -32,9 +32,12 @@ from .emotions import AsyncEmotionalCore, EmotionalEvent
 from .intentions import DurableIntentionEngine
 from .llm_provider import LLMProvider
 from .modes import AsyncOrganismModes
+from .neuro import NeuromodulatorField, SynapticGraphEngine
 from .pacing import ResponsePacingEngine
+from .priors import ColdStartPrior, PriorProvider
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
+from .sleep import SleepConsolidationWorker
 from .state_store import ProactiveScheduleRecord, StateStore
 from .world import WorldStateAnchor
 
@@ -49,6 +52,7 @@ class BrainEngine:
         llm: LLMProvider | None = None,
         profile: PersonaProfile = DEFAULT_KRISTINA_PROFILE,
         clock: ClockProvider | None = None,
+        prior_provider: PriorProvider | None = None,
     ) -> None:
         self.store = store
         self.profile = profile
@@ -72,6 +76,9 @@ class BrainEngine:
             max_delay_seconds=profile.pacing_max_delay_seconds,
         )
         self.intentions = DurableIntentionEngine(store, clock=self.clock)
+        self.prior_provider = prior_provider
+        self.synapses = SynapticGraphEngine(store, clock=self.clock)
+        self.sleep_worker = SleepConsolidationWorker(store, self.synapses, self.modes, clock=self.clock)
         self.shadow_telemetry = AsyncShadowTelemetryStore(store)
 
     async def start(self) -> None:
@@ -203,6 +210,20 @@ class BrainEngine:
             fast_state = dict(fast_state)
             fast_state["for_llm"] = f"{fast_state['for_llm']} {' '.join(extra_lines)}"
 
+        mode_snap = await self.modes.snapshot(scope_id)
+        chem = NeuromodulatorField.from_brain_state(
+            fast_state,
+            mode_snap,
+            is_quiet_hours=bool(fast_state["is_night"] or dual_clock["counterparty_is_night"]),
+        )
+        stim_map: dict[str, float] = {}
+        if reaction == "warmth":
+            stim_map["sensor_warmth"] = intensity
+        elif reaction == "curiosity":
+            stim_map["sensor_curiosity"] = intensity
+        elif reaction in ("frustration", "concern"):
+            stim_map["sensor_conflict"] = intensity
+        neural_pulse = await self.synapses.propagate_stimuli(stim_map, chem, scope_id=scope_id, at=utc_now)
         pacing = self.pacing_engine.calculate(fast_state, user_input_length=len(user_input))
         dominant_modes = await self.modes.dominant(scope_id, limit=3)
 
@@ -224,6 +245,7 @@ class BrainEngine:
             if appraisal
             else None,
             "fast_state": fast_state,
+            "neural_pulse": neural_pulse,
             "response_pacing": {
                 "delay_seconds": pacing.delay_seconds,
                 "verbosity_hint": pacing.verbosity_hint,
@@ -416,3 +438,89 @@ class BrainEngine:
 
     async def get_artifacts(self, scope_id: str = "default", *, limit: int = 5) -> list[CreativeArtifact]:
         return await self.store.list_artifacts(scope_id, limit=limit)
+
+    async def initialize_scope_with_prior(
+        self,
+        scope_id: str,
+        metadata: Mapping[str, Any],
+    ) -> ColdStartPrior:
+        """Применяет внешний плагин PriorProvider (например, для холодного старта гостя отеля)."""
+        if self.prior_provider is None:
+            raise RuntimeError("No PriorProvider configured on this BrainEngine")
+        now = self.clock.now_utc()
+        prior = self.prior_provider.compute_prior(scope_id, metadata)
+        snap = await self.modes.relax_to_baseline(scope_id, at=now)
+        updates = []
+        for mode_name, offset in prior.initial_mode_offsets.items():
+            if mode_name in snap:
+                st = snap[mode_name]
+                clamped_amp = max(0.0, min(1.0, round(st.baseline + float(offset), 4)))
+                updates.append(
+                    {
+                        "name": mode_name,
+                        "baseline": st.baseline,
+                        "amplitude": clamped_amp,
+                        "phase": st.phase,
+                        "half_life_hours": st.half_life_hours,
+                        "updated_at": now.isoformat(),
+                    }
+                )
+        if updates:
+            await self.store.upsert_modes_atomic(scope_id, updates)
+        await self.synapses.ensure_circuit(
+            scope_id,
+            initial_synapse_overrides=prior.initial_synapse_weights,
+            at=now,
+        )
+        return prior
+
+    async def pulse_synapses(
+        self,
+        scope_id: str,
+        stimuli: Mapping[str, float],
+    ) -> dict[str, Any]:
+        """Прямой субсимвольный импульс в синаптическую сеть без вызова LLM (<1 мс)."""
+        utc_now = self.clock.now_utc()
+        fast = await self.emotions.get_emotional_state(scope_id)
+        mode_snap = await self.modes.snapshot(scope_id)
+        world = await self.get_world_context(scope_id)
+        chem = NeuromodulatorField.from_brain_state(
+            fast,
+            mode_snap,
+            is_quiet_hours=bool(fast["is_night"] or world["counterparty_is_night"]),
+        )
+        return await self.synapses.propagate_stimuli(stimuli, chem, scope_id=scope_id, at=utc_now)
+
+    async def run_sleep_consolidation(
+        self,
+        scope_id: str = "default",
+        *,
+        reward_signal: float = 0.0,
+    ) -> dict[str, Any]:
+        """Запускает ночное обучение синапсов Хебба, дрейф baseline и синтез семени сна DreamSeed."""
+        utc_now = self.clock.now_utc()
+        fast = await self.emotions.get_emotional_state(scope_id)
+        mode_snap = await self.modes.snapshot(scope_id)
+        chem = NeuromodulatorField.from_brain_state(fast, mode_snap, is_quiet_hours=True)
+        rep = await self.sleep_worker.consolidate(
+            scope_id,
+            reward_signal=reward_signal,
+            chem=chem,
+            at=utc_now,
+        )
+        return {
+            "scope_id": rep.scope_id,
+            "consolidated_at": rep.consolidated_at.isoformat(),
+            "synapses_adjusted": rep.synapses_adjusted,
+            "synapse_deltas": rep.synapse_deltas,
+            "modes_drifted": rep.modes_drifted,
+            "baseline_deltas": rep.baseline_deltas,
+            "dream_seed": {
+                "dominant_themes": list(rep.dream_seed.dominant_themes),
+                "sensory_fragments": list(rep.dream_seed.sensory_fragments),
+                "creative_draft_bridge": rep.dream_seed.creative_draft_bridge,
+                "vividness": rep.dream_seed.vividness,
+            }
+            if rep.dream_seed
+            else None,
+        }

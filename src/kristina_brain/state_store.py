@@ -111,6 +111,10 @@ class StateStore(Protocol):
     async def upsert_artifact(self, artifact: CreativeArtifact) -> None: ...
     async def list_artifacts(self, scope_id: str, *, limit: int = 5) -> list[CreativeArtifact]: ...
 
+    # --- Субсимвольный нейронно-синаптический граф (v1.1.0) ---
+    async def load_neural_graph(self, scope_id: str) -> dict[str, Any] | None: ...
+    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None: ...
+
     # --- Приватная Shadow-телеметрия решений без PII ---
     async def insert_shadow_telemetry_once(self, row: Mapping[str, Any]) -> bool: ...
     async def list_shadow_telemetry(
@@ -325,6 +329,17 @@ class AsyncSQLiteStateStore:
                         status_note TEXT NOT NULL,
                         updated_at TEXT NOT NULL,
                         PRIMARY KEY (scope_id, artifact_id)
+                    )
+                    """
+                )
+
+                # 5f. Нейронно-синаптический граф и следы пригодности (v1.1.0)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS brain_neural_graphs (
+                        scope_id TEXT PRIMARY KEY,
+                        graph_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
                     )
                     """
                 )
@@ -1049,3 +1064,38 @@ class AsyncSQLiteStateStore:
             ]
 
         return await self._run(_op)
+
+    async def load_neural_graph(self, scope_id: str) -> dict[str, Any] | None:
+        def _op(conn: sqlite3.Connection) -> dict[str, Any] | None:
+            row = conn.execute(
+                "SELECT graph_json FROM brain_neural_graphs WHERE scope_id = ?",
+                (scope_id,),
+            ).fetchone()
+            return json.loads(row["graph_json"]) if row else None
+
+        return await self._run(_op)
+
+    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+        serialized = json.dumps(dict(graph), ensure_ascii=False)
+        now_iso = str(graph.get("updated_at") or datetime.now(UTC).isoformat())
+
+        def _op(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO brain_neural_graphs(scope_id, graph_json, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(scope_id) DO UPDATE SET
+                        graph_json = excluded.graph_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (scope_id, serialized, now_iso),
+                )
+                conn.execute("COMMIT;")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        await self._run(_op)

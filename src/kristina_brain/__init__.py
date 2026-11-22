@@ -27,11 +27,14 @@ from .llm_provider import (
     OllamaChatProvider,
 )
 from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
+from .neuro import NeuromodulatorField, NeuronNode, SpikeEvent, SynapseEdge, SynapticGraphEngine
 from .pacing import ResponsePacing, ResponsePacingEngine
 from .packs import AI_COMPANION_PACK, B2B_CSM_PACK, GAME_NPC_PACK, VERTICAL_PACKS, load_vertical_pack
 from .postgres_store import AsyncPostgresStateStore, create_state_store
+from .priors import ColdStartPrior, PriorProvider
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
+from .sleep import DreamSeed, SleepConsolidationReport, SleepConsolidationWorker
 from .state_store import (
     AsyncSQLiteStateStore,
     ProactiveScheduleRecord,
@@ -80,6 +83,16 @@ __all__ = [
     "evaluate_with_shadow",
     "AsyncShadowTelemetryStore",
     "BrainEngine",
+    "ColdStartPrior",
+    "DreamSeed",
+    "NeuromodulatorField",
+    "NeuronNode",
+    "PriorProvider",
+    "SleepConsolidationReport",
+    "SleepConsolidationWorker",
+    "SpikeEvent",
+    "SynapseEdge",
+    "SynapticGraphEngine",
     "create_control_plane_app",
     "sign_webhook_payload",
     "DurableIntention",
@@ -92,4 +105,4 @@ __all__ = [
     "resolve_iana_timezone",
 ]
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"

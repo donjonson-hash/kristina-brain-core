@@ -1,5 +1,5 @@
 """
-Commercial Cloud Control Plane MVP (v1.0.1) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
+Commercial Cloud Control Plane MVP (v1.1.0) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
 Запускается командой `brain-core-cloud` (требует `pip install 'kristina-brain-core[cloud]'`).
 
 Возможности платного контура ($29 Starter / $149 Pro):
@@ -80,7 +80,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <input id="scopeId" type="text" value="hermes:syndiai" placeholder="scope_id" style="width:180px">
     <button onclick="refreshAll()">Refresh Telemetry</button>
     <button class="secondary" onclick="triggerHeartbeat()">Run Heartbeat Tick</button>
-    <span class="badge" id="versionBadge">v1.0.1</span>
+    <span class="badge" id="versionBadge">v1.1.0</span>
   </div>
 </header>
 
@@ -251,7 +251,7 @@ def create_control_plane_app(
 
     app = FastAPI(
         title="Kristina Brain Engine — Cloud Control Plane",
-        version="1.0.1",
+        version="1.1.0",
         lifespan=lifespan,
     )
 
@@ -277,7 +277,7 @@ def create_control_plane_app(
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
-        return {"status": "ok", "version": "1.0.1"}
+        return {"status": "ok", "version": "1.1.0"}
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
@@ -427,6 +427,17 @@ def create_control_plane_app(
             "summary": summary,
             "recent": recent_rows,
         }
+
+    @app.get("/v1/neuro/{scope_id:path}", dependencies=[Depends(verify_api_key)])
+    async def neuro_graph_endpoint(scope_id: str) -> dict[str, Any]:
+        eng: BrainEngine = state_holder["engine"]
+        return await eng.synapses.inspect_graph(scope_id)
+
+    @app.post("/v1/sleep/{scope_id:path}", dependencies=[Depends(verify_api_key)])
+    async def sleep_endpoint(scope_id: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        eng: BrainEngine = state_holder["engine"]
+        reward = float(body.get("reward_signal", 0.0))
+        return await eng.run_sleep_consolidation(scope_id, reward_signal=reward)
 
     return app
 

@@ -169,6 +169,13 @@ POSTGRES_DDL_STATEMENTS: tuple[str, ...] = (
         PRIMARY KEY (scope_id, artifact_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS brain_neural_graphs (
+        scope_id TEXT PRIMARY KEY,
+        graph_json JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+    )
+    """,
     "CREATE INDEX IF NOT EXISTS idx_pg_shadow_observed ON shadow_decision_telemetry(observed_at DESC)",
 )
 
@@ -782,6 +789,35 @@ class AsyncPostgresStateStore:
                 )
                 for r in rows
             ]
+
+    async def load_neural_graph(self, scope_id: str) -> dict[str, Any] | None:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT graph_json FROM brain_neural_graphs WHERE scope_id = $1",
+                scope_id,
+            )
+            if row is None:
+                return None
+            res: dict[str, Any] = _loads_if_str(row["graph_json"], {})
+            return res
+
+    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+        pool = await self._ensure_pool()
+        serialized = json.dumps(dict(graph), ensure_ascii=False)
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO brain_neural_graphs(scope_id, graph_json, updated_at)
+                VALUES ($1, $2::jsonb, $3)
+                ON CONFLICT (scope_id) DO UPDATE SET
+                    graph_json = EXCLUDED.graph_json,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                scope_id,
+                serialized,
+                _dt_utc(graph.get("updated_at")) or datetime.now(UTC),
+            )
 
 
 def create_state_store(dsn_or_path: str | Path = "kristina_state.db") -> StateStore:

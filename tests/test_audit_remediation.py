@@ -25,6 +25,7 @@ from kristina_brain import (
     AsyncSQLiteStateStore,
     BigFiveTraits,
     BrainEngine,
+    ColdStartPrior,
     FixedClock,
     HTTPXChatCompletionsProvider,
     PersonaProfile,
@@ -293,6 +294,8 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                         "brain_list_intentions",
                         "brain_save_artifact",
                         "brain_list_artifacts",
+                        "brain_pulse_synapses",
+                        "brain_sleep_consolidate",
                         "brain_shadow_summary",
                     },
                 )
@@ -671,6 +674,106 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertIn("Город без достопримечательностей", res["fast_state"]["for_llm"])
                 self.assertIn("Свеавеген", res["fast_state"]["for_llm"])
+            finally:
+                await engine.shutdown()
+
+    async def test_v110_synaptic_lif_hebbian_sleep_dream_seed_and_prior_plugin(self) -> None:
+        """v1.1.0: Не-LLM нейроны/синапсы, тормозной рефлекс безопасности, обучение Хебба, дрейф baseline, DreamSeed и PriorProvider."""
+        self.assertIn("писательница", DEFAULT_KRISTINA_PROFILE.persona_system_prompt)
+
+        class DummyPriorPlugin:
+            def compute_prior(self, scope_id: str, metadata: dict[str, object]) -> ColdStartPrior:
+                return ColdStartPrior(
+                    archetype_tag="aesthetic_sensory",
+                    initial_mode_offsets={"aesthetic_drive": 0.20, "creativity_357": 0.18},
+                    initial_synapse_weights={"inter_rapport_drive->gate_proactive_outreach": 0.82},
+                    prior_confidence=0.30,
+                    operational_brief={"welcome": "herbal_tea"},
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = create_state_store(Path(tmp) / "v110.db")
+            clock = FixedClock(datetime(2026, 11, 22, 14, 0, tzinfo=UTC), "Europe/Stockholm")
+            engine = BrainEngine(store, clock=clock, prior_provider=DummyPriorPlugin())
+            await engine.start()
+            try:
+                # 1. Инициализация нового scope через внешний плагин PriorProvider
+                prior = await engine.initialize_scope_with_prior("writer:1", {"hint": "test"})
+                self.assertEqual(prior.archetype_tag, "aesthetic_sensory")
+
+                # 2. Сохраняем черновик про Свеавеген и якорь Унаватуны для будущего сна
+                await engine.save_artifact(
+                    scope_id="writer:1",
+                    artifact_id="sveavagen",
+                    title="Город без достопримечательностей",
+                    excerpt="Женщина в жёлтой куртке смотрит на дорогу на Свеавеген.",
+                )
+                await engine.ingest_message(
+                    scope_id="writer:1",
+                    event_id="m-warm",
+                    user_input="У нас в Унаватуне слышен океан прямо у крыльца!",
+                    explicit_appraisal=Appraisal(
+                        reaction="warmth",
+                        intensity=0.95,
+                        source_quote="слышен океан",
+                        interest_action="keep",
+                        topic="океан",
+                        reflection="тепло",
+                        detected_location="Унаватуна, Шри-Ланка",
+                        environment_cue="шум океана у крыльца",
+                    ),
+                )
+
+                # 3. Не-LLM импульс тепла + паузы пробивает моторный шлюз gate_proactive_outreach!
+                pulse_ok = await engine.pulse_synapses(
+                    "writer:1",
+                    {"sensor_warmth": 0.9, "sensor_silence_window": 0.85},
+                )
+                self.assertIn("gate_proactive_outreach", pulse_ok["opened_motor_gates"])
+
+                # 4. А при конфликте тормозной синапс (-0.95, plasticity=0.0) гасит outreach и будит gate_urgent_escalation!
+                clock.advance(hours=1)
+                pulse_conflict = await engine.pulse_synapses(
+                    "writer:1",
+                    {"sensor_warmth": 0.6, "sensor_conflict": 0.95},
+                )
+                self.assertNotIn("gate_proactive_outreach", pulse_conflict["opened_motor_gates"])
+                self.assertIn("gate_urgent_escalation", pulse_conflict["opened_motor_gates"])
+
+                # 5. Ночная консолидация сна (03:30): положительный reward усиливает пластичные синапсы,
+                #    сдвигает baseline мод и сплетает DreamSeed из Унаватуны + Свеавеген!
+                graph_before = await engine.synapses.inspect_graph("writer:1")
+                w_before = next(
+                    s["weight"] for s in graph_before["synapses"] if s["edge"] == "sensor_warmth->inter_rapport_drive"
+                )
+                hardwired_before = next(
+                    s["weight"]
+                    for s in graph_before["synapses"]
+                    if s["edge"] == "sensor_conflict->gate_proactive_outreach"
+                )
+
+                clock.set_utc(datetime(2026, 11, 23, 2, 30, tzinfo=UTC))
+                sleep_rep = await engine.run_sleep_consolidation("writer:1", reward_signal=0.85)
+
+                self.assertGreater(sleep_rep["synapses_adjusted"], 0)
+                self.assertGreater(sleep_rep["modes_drifted"], 0)
+                self.assertIsNotNone(sleep_rep["dream_seed"])
+                self.assertIn("Свеавеген", sleep_rep["dream_seed"]["creative_draft_bridge"])
+                self.assertTrue(
+                    any("Унаватуна" in f or "океана" in f for f in sleep_rep["dream_seed"]["sensory_fragments"])
+                )
+
+                graph_after = await engine.synapses.inspect_graph("writer:1")
+                w_after = next(
+                    s["weight"] for s in graph_after["synapses"] if s["edge"] == "sensor_warmth->inter_rapport_drive"
+                )
+                hardwired_after = next(
+                    s["weight"]
+                    for s in graph_after["synapses"]
+                    if s["edge"] == "sensor_conflict->gate_proactive_outreach"
+                )
+                self.assertGreater(w_after, w_before)
+                self.assertEqual(hardwired_after, hardwired_before)  # Врождённый рефлекс неприкосновенен!
             finally:
                 await engine.shutdown()
 
