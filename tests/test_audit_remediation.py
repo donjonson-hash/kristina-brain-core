@@ -29,7 +29,9 @@ from kristina_brain import (
     HTTPXChatCompletionsProvider,
     PersonaProfile,
     StateStore,
+    create_control_plane_app,
     create_state_store,
+    sign_webhook_payload,
 )
 from kristina_brain.llm_provider import FailoverLLMProvider, LLMHTTPError
 from kristina_brain.mcp_server import BrainMCPServer
@@ -565,6 +567,75 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(r["event_applied"] for r in results))
             finally:
                 await engine.shutdown()
+
+    def test_v080_cloud_control_plane_auth_hot_profile_and_roi_dashboard(self) -> None:
+        """v0.8.0: Проверка Cloud Control Plane (API-ключ, горячее обновление профиля, 12 мод, Shadow ROI и /dashboard)."""
+        from fastapi.testclient import TestClient
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = create_state_store(Path(tmp) / "cloud_cp.db")
+            clock = FixedClock(datetime(2026, 11, 22, 13, 0, tzinfo=UTC), "Europe/Stockholm")
+            app = create_control_plane_app(
+                store=store,
+                clock=clock,
+                api_key="cp-test-token-999",
+                webhook_secret="wh-sec-1",
+            )
+            with TestClient(app) as client:
+                # 1. Публичные /healthz и /dashboard доступны, но /v1/* без ключа отдаёт 401
+                self.assertEqual(client.get("/healthz").status_code, 200)
+                dash = client.get("/dashboard")
+                self.assertEqual(dash.status_code, 200)
+                self.assertIn("Cloud Control Plane", dash.text)
+                self.assertEqual(client.get("/v1/profile").status_code, 401)
+
+                headers = {"X-API-Key": "cp-test-token-999"}
+
+                # 2. Горячее включение 12 медленных мод через PUT /v1/profile без рестарта сервера
+                put_res = client.put(
+                    "/v1/profile",
+                    headers=headers,
+                    json={"proactive_threshold": 0.55, "enable_slow_modes_in_decisions": True},
+                )
+                self.assertEqual(put_res.status_code, 200)
+                self.assertTrue(put_res.json()["enable_slow_modes_in_decisions"])
+
+                # 3. Запись события с локацией Унаватуна через POST /v1/ingest
+                ing_res = client.post(
+                    "/v1/ingest",
+                    headers=headers,
+                    json={
+                        "scope_id": "tenant:sri-lanka",
+                        "event_id": "cp-ev-1",
+                        "user_input": "Домик в Унаватуне у океана!",
+                        "reaction": "frustration",
+                        "intensity": 0.95,
+                        "detected_location": "Унаватуна",
+                    },
+                )
+                self.assertEqual(ing_res.status_code, 200)
+                self.assertEqual(ing_res.json()["world_anchor"]["counterparty_timezone"], "Asia/Colombo")
+
+                # 4. Чтение полного состояния 12 мод и выполнение heartbeat + чтение ROI
+                st_res = client.get("/v1/state/tenant:sri-lanka", headers=headers)
+                self.assertEqual(st_res.status_code, 200)
+                self.assertEqual(len(st_res.json()["modes"]), 12)
+
+                clock.advance(hours=4)
+                hb_res = client.post(
+                    "/v1/heartbeat/tenant:sri-lanka",
+                    headers=headers,
+                    json={"commit_proactive_send": False},
+                )
+                self.assertEqual(hb_res.status_code, 200)
+                self.assertEqual(hb_res.json()["effective_decision"]["reason"], "wants_space")
+
+                roi_res = client.get("/v1/shadow/roi?window_hours=24", headers=headers)
+                self.assertEqual(roi_res.status_code, 200)
+                self.assertGreaterEqual(roi_res.json()["summary"]["observations"], 1)
+
+                sig = sign_webhook_payload("wh-sec-1", b'{"ok":true}')
+                self.assertTrue(sig.startswith("sha256="))
 
 
 if __name__ == "__main__":

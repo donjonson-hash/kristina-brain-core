@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kristina-brain-core"
-version = "0.7.0"
+version = "0.8.0"
 description = "Dual-timescale affective state, cognitive appraisal, proactive silence policy, and PII-free shadow telemetry engine for autonomous AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,7 +30,10 @@ Issues = "https://github.com/donjonson-hash/kristina-brain-core/issues"
 
 [project.optional-dependencies]
 postgres = ["asyncpg>=0.29.0"]
+cloud = ["fastapi>=0.110.0", "uvicorn>=0.29.0"]
 dev = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.0",
     "ruff>=0.6.0",
@@ -39,6 +42,7 @@ dev = [
 
 [project.scripts]
 brain-core-mcp = "kristina_brain.mcp_server:main"
+brain-core-cloud = "kristina_brain.control_plane:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -61,6 +65,7 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]
+"src/kristina_brain/control_plane.py" = ["B008"]
 
 [tool.mypy]
 python_version = "3.11"

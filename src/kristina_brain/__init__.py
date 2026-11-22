@@ -13,6 +13,7 @@ from .autonomy import (
     evaluate_with_shadow,
 )
 from .clock import ClockProvider, FixedClock, SystemClock
+from .control_plane import create_control_plane_app, sign_webhook_payload
 from .dialogue import dialogue_proactive_block_reason, is_repeated_question
 from .emotions import FAST_STATE_KEYS, AsyncEmotionalCore, EmotionalEvent
 from .engine import BrainEngine
@@ -71,6 +72,8 @@ __all__ = [
     "evaluate_with_shadow",
     "AsyncShadowTelemetryStore",
     "BrainEngine",
+    "create_control_plane_app",
+    "sign_webhook_payload",
     "DurableIntention",
     "DurableIntentionEngine",
     "dialogue_proactive_block_reason",
@@ -81,4 +84,4 @@ __all__ = [
     "resolve_iana_timezone",
 ]
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"

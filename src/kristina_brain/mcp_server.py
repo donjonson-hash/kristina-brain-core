@@ -149,7 +149,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.7.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.8.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
