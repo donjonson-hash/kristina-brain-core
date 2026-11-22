@@ -21,12 +21,15 @@ from pathlib import Path
 from kristina_brain import (
     DEFAULT_KRISTINA_PROFILE,
     Appraisal,
+    AsyncPostgresStateStore,
     AsyncSQLiteStateStore,
     BigFiveTraits,
     BrainEngine,
     FixedClock,
     HTTPXChatCompletionsProvider,
     PersonaProfile,
+    StateStore,
+    create_state_store,
 )
 from kristina_brain.llm_provider import FailoverLLMProvider, LLMHTTPError
 from kristina_brain.mcp_server import BrainMCPServer
@@ -531,6 +534,35 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 clock.advance(hours=3)
                 tick_unblocked = await engine.heartbeat_tick("u:ocean", commit_proactive_send=False)
                 self.assertEqual(tick_unblocked["effective_decision"]["action"], "message")
+            finally:
+                await engine.shutdown()
+
+    async def test_v070_postgres_protocol_and_500_concurrent_tenants(self) -> None:
+        """v0.7.0: Соответствие AsyncPostgresStateStore протоколу StateStore, защита пароля DSN и нагрузка 500 параллельных scope_id."""
+        pg_store = create_state_store("postgresql://admin:SUPER_SECRET_PG_PASS@db.internal:5432/brain")
+        self.assertIsInstance(pg_store, AsyncPostgresStateStore)
+        self.assertIsInstance(pg_store, StateStore)
+        self.assertNotIn("SUPER_SECRET_PG_PASS", repr(pg_store))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            sqlite_store = create_state_store(Path(tmp) / "multitenant_500.db")
+            clock = FixedClock(datetime(2026, 11, 22, 12, 0, tzinfo=UTC), "UTC")
+            engine = BrainEngine(sqlite_store, clock=clock)
+            await engine.start()
+            try:
+                appr = Appraisal("warmth", 0.75, "ok", "keep", "scale", "load test")
+                batch = [
+                    engine.ingest_message(
+                        scope_id=f"org:tenant-{idx:04d}",
+                        event_id="ev-1",
+                        user_input=f"Hello from tenant {idx}",
+                        explicit_appraisal=appr,
+                    )
+                    for idx in range(500)
+                ]
+                results = await asyncio.gather(*batch)
+                self.assertEqual(len(results), 500)
+                self.assertTrue(all(r["event_applied"] for r in results))
             finally:
                 await engine.shutdown()
 

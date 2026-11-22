@@ -22,8 +22,8 @@ from typing import Any
 from .appraisal import Appraisal
 from .engine import BrainEngine
 from .llm_provider import FailoverLLMProvider, LLMProvider, OllamaChatProvider
+from .postgres_store import create_state_store
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
-from .state_store import AsyncSQLiteStateStore
 
 MCP_TOOLS_SCHEMA = [
     {
@@ -149,7 +149,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.6.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.7.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -277,7 +277,7 @@ async def run_stdio_server() -> None:
     db_path = os.getenv("BRAIN_CORE_DB", "kristina_state.db")
     profile_path = os.getenv("BRAIN_CORE_PROFILE_JSON")
     profile = PersonaProfile.from_json_file(profile_path) if profile_path else DEFAULT_KRISTINA_PROFILE
-    store = AsyncSQLiteStateStore(db_path)
+    store = create_state_store(db_path)
     ollama_model = os.getenv("BRAIN_CORE_OLLAMA_MODEL")
     ollama_host = os.getenv("BRAIN_CORE_OLLAMA_HOST", "http://127.0.0.1:11434")
     llm: LLMProvider | None = None

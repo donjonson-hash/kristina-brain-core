@@ -26,6 +26,7 @@ from .llm_provider import (
 )
 from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
 from .pacing import ResponsePacing, ResponsePacingEngine
+from .postgres_store import AsyncPostgresStateStore, create_state_store
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
 from .state_store import (
@@ -49,7 +50,9 @@ __all__ = [
     "OllamaChatProvider",
     "LLMProviderError",
     "StateStore",
+    "AsyncPostgresStateStore",
     "AsyncSQLiteStateStore",
+    "create_state_store",
     "ProactiveScheduleRecord",
     "EmotionalEvent",
     "AsyncEmotionalCore",
@@ -78,4 +81,4 @@ __all__ = [
     "resolve_iana_timezone",
 ]
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"

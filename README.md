@@ -13,7 +13,7 @@ Most AI agent frameworks solve *what an agent remembers* (passive RAG / context 
 - **Physiological Response Pacing (`ResponsePacingEngine`)**: deterministic typing/reply delay (`delay_seconds`), verbosity hints, and sensory curiosity flags.
 - **Built-in MCP Server (`brain-core-mcp`)**: zero-overhead JSON-RPC 2.0 stdio server for Hermes Agent, Claude Desktop, Cursor, and custom runtimes.
 
-## Live Model & B2B Pilot Benchmarks (v0.6.0)
+## Live Model & B2B Pilot Benchmarks (v0.7.0)
 
 | Provider / Contour | JSON Validity | Appraisal Accuracy | Avg Latency | Role in Cascade |
 | :--- | :---: | :---: | :---: | :--- |
@@ -26,7 +26,7 @@ In a 14-day multi-tenant B2B Customer Success simulation across 3 polar accounts
 ## Installation
 
 ```bash
-pip install "kristina-brain-core @ git+[https://github.com/donjonson-hash/kristina-brain-core.git@v0.6.0](https://github.com/donjonson-hash/kristina-brain-core.git@v0.6.0)"
+pip install "kristina-brain-core @ git+[https://github.com/donjonson-hash/kristina-brain-core.git@v0.7.0](https://github.com/donjonson-hash/kristina-brain-core.git@v0.7.0)"
 import asyncio
 from kristina_brain import (
     AsyncSQLiteStateStore,
