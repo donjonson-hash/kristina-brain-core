@@ -15,7 +15,13 @@ from .autonomy import (
 from .clock import ClockProvider, FixedClock, SystemClock
 from .emotions import FAST_STATE_KEYS, AsyncEmotionalCore, EmotionalEvent
 from .engine import BrainEngine
-from .llm_provider import HTTPXChatCompletionsProvider, LLMProvider, LLMProviderError
+from .llm_provider import (
+    FailoverLLMProvider,
+    HTTPXChatCompletionsProvider,
+    LLMProvider,
+    LLMProviderError,
+    OllamaChatProvider,
+)
 from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
@@ -35,6 +41,8 @@ __all__ = [
     "DEFAULT_KRISTINA_PROFILE",
     "LLMProvider",
     "HTTPXChatCompletionsProvider",
+    "FailoverLLMProvider",
+    "OllamaChatProvider",
     "LLMProviderError",
     "StateStore",
     "AsyncSQLiteStateStore",
@@ -58,4 +66,4 @@ __all__ = [
     "BrainEngine",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

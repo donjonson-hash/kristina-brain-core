@@ -1,13 +1,13 @@
 """
 Модуль когнитивной предоценки входящих стимулов CognitiveAppraiser.
-- Полностью сохраняет контракт Appraisal из cognitive_appraisal.py (5 реакций, intensity,
-  source_quote, interest_action, topic, reflection, dialogue).
-- Использует параметризованный PersonaProfile и ClockProvider вместо хардкода Europe/Stockholm.
+- Поддерживает канонические 5 реакций + словарь частых синонимов LLM (joy -> warmth и др.).
+- Очищает <think>...</think> блоки гибридных моделей и логирует деградации провайдера.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -17,9 +17,39 @@ from .clock import ClockProvider, SystemClock
 from .llm_provider import LLMProvider, LLMProviderError
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
 
+logger = logging.getLogger(__name__)
+
 ALLOWED_REACTIONS = frozenset({"curiosity", "warmth", "concern", "frustration", "neutral"})
 ALLOWED_INTEREST_ACTIONS = frozenset({"keep", "open", "resolve", "ignore"})
 
+REACTION_ALIASES: Mapping[str, str] = {
+    "joy": "warmth",
+    "happy": "warmth",
+    "happiness": "warmth",
+    "gratitude": "warmth",
+    "affection": "warmth",
+    "positive": "warmth",
+    "interest": "curiosity",
+    "interested": "curiosity",
+    "curious": "curiosity",
+    "intrigue": "curiosity",
+    "worry": "concern",
+    "worried": "concern",
+    "anxiety": "concern",
+    "anxious": "concern",
+    "fear": "concern",
+    "alarm": "concern",
+    "anger": "frustration",
+    "angry": "frustration",
+    "annoyance": "frustration",
+    "irritation": "frustration",
+    "irritated": "frustration",
+    "upset": "frustration",
+    "calm": "neutral",
+    "ack": "neutral",
+}
+
+_THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 
 
@@ -35,8 +65,8 @@ class Appraisal:
 
     @classmethod
     def parse(cls, raw: str, user_input: str) -> Appraisal:
-        """Строгий парсинг и нормализация JSON-ответа LLM."""
-        cleaned = raw.strip()
+        """Строгий парсинг и нормализация JSON-ответа LLM с маппингом синонимов."""
+        cleaned = _THINK_BLOCK_RE.sub("", raw).strip()
         fence_match = _JSON_FENCE_RE.search(cleaned)
         if fence_match:
             cleaned = fence_match.group(1)
@@ -50,7 +80,8 @@ class Appraisal:
         if not isinstance(data, Mapping):
             raise ValueError("Appraisal JSON must be an object")
 
-        reaction = str(data.get("reaction", "neutral")).strip().lower()
+        raw_reaction = str(data.get("reaction", "neutral")).strip().lower()
+        reaction = REACTION_ALIASES.get(raw_reaction, raw_reaction)
         if reaction not in ALLOWED_REACTIONS:
             reaction = "neutral"
 
@@ -102,7 +133,9 @@ class CognitiveAppraiser:
         local_now = self.clock.now_local(self.profile.timezone)
         parts = [
             f"Текущее локальное время ({self.profile.locale_city_label}, {self.profile.timezone}): "
-            f"{local_now.isoformat()}. Используй эту дату для календарных сравнений.",
+            f"{local_now.isoformat()}. Оцени ТОЛЬКО последнее входящее сообщение пользователя "
+            "(история дана лишь для контекста). Допустимые значения поля reaction СТРОГО из списка: "
+            "curiosity, warmth, concern, frustration, neutral.",
         ]
         if interest:
             parts.append(f"Текущий фокус интереса: {json.dumps(dict(interest), ensure_ascii=False)}")
@@ -137,10 +170,14 @@ class CognitiveAppraiser:
             raw = await self.llm.complete(
                 messages,
                 temperature=0.2,
-                max_tokens=900 if dialogue is not None else 500,
-                timeout=20.0,
+                max_tokens=900 if dialogue is not None else 450,
+                timeout=25.0,
+                json_mode=True,
             )
             return Appraisal.parse(raw, user_input)
-        except (LLMProviderError, ValueError, json.JSONDecodeError):
-            # При сбое LLM или битом JSON возвращаем None (вызывающий контур безопасно деградирует к neutral)
+        except LLMProviderError as exc:
+            logger.warning("CognitiveAppraiser LLM error: %s", exc)
+            return None
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.warning("CognitiveAppraiser JSON parse error: %s", exc)
             return None

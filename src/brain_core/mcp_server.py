@@ -21,6 +21,7 @@ from typing import Any
 
 from .appraisal import Appraisal
 from .engine import BrainEngine
+from .llm_provider import FailoverLLMProvider, LLMProvider, OllamaChatProvider
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
 from .state_store import AsyncSQLiteStateStore
 
@@ -48,7 +49,6 @@ MCP_TOOLS_SCHEMA = [
                 "reaction": {
                     "type": "string",
                     "enum": ["curiosity", "warmth", "concern", "frustration", "neutral"],
-                    "default": "neutral",
                 },
                 "intensity": {"type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.5},
                 "reflection": {"type": "string", "default": ""},
@@ -99,7 +99,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.2.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.3.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -145,13 +145,18 @@ class BrainMCPServer:
             scope_id = str(args["scope_id"])
             event_id = str(args["event_id"])
             user_input = str(args["user_input"])
-            appraisal = Appraisal(
-                reaction=str(args.get("reaction", "neutral")),
-                intensity=float(args.get("intensity", 0.5)),
-                source_quote=user_input[:100],
-                interest_action="keep",
-                topic="mcp_event",
-                reflection=str(args.get("reflection", "")),
+            explicit_reaction = args.get("reaction")
+            appraisal = (
+                Appraisal(
+                    reaction=str(explicit_reaction),
+                    intensity=float(args.get("intensity", 0.5)),
+                    source_quote=user_input[:100],
+                    interest_action="keep",
+                    topic="mcp_event",
+                    reflection=str(args.get("reflection", "")),
+                )
+                if explicit_reaction is not None or self.engine.appraiser is None
+                else None
             )
             return await self.engine.ingest_message(
                 scope_id=scope_id,
@@ -177,7 +182,14 @@ async def run_stdio_server() -> None:
     profile_path = os.getenv("BRAIN_CORE_PROFILE_JSON")
     profile = PersonaProfile.from_json_file(profile_path) if profile_path else DEFAULT_KRISTINA_PROFILE
     store = AsyncSQLiteStateStore(db_path)
-    engine = BrainEngine(store, profile=profile)
+    ollama_model = os.getenv("BRAIN_CORE_OLLAMA_MODEL")
+    ollama_host = os.getenv("BRAIN_CORE_OLLAMA_HOST", "http://127.0.0.1:11434")
+    llm: LLMProvider | None = None
+    if ollama_model:
+        models = [m.strip() for m in ollama_model.split(",") if m.strip()]
+        providers = [OllamaChatProvider(model=m, host=ollama_host, think=False) for m in models]
+        llm = providers[0] if len(providers) == 1 else FailoverLLMProvider(providers)
+    engine = BrainEngine(store, llm=llm, profile=profile)
     await engine.start()
     server = BrainMCPServer(engine)
 

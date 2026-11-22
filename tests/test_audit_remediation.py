@@ -28,6 +28,7 @@ from brain_core import (
     HTTPXChatCompletionsProvider,
     PersonaProfile,
 )
+from brain_core.llm_provider import FailoverLLMProvider, LLMHTTPError
 from brain_core.mcp_server import BrainMCPServer
 
 
@@ -45,6 +46,7 @@ class FakeLLMProvider:
         temperature: float = 0.7,
         max_tokens: int = 800,
         timeout: float | None = None,
+        json_mode: bool = False,
     ) -> str:
         self.calls += 1
         return self.canned_json
@@ -301,6 +303,41 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(parsed["event_applied"])
             finally:
                 await engine.shutdown()
+
+    async def test_think_strip_aliases_and_failover_circuit_breaker(self) -> None:
+        """v0.3: Очистка <think>, алиас joy->warmth и отключение HTTP 410 провайдера с 1-й ошибки."""
+        parsed = Appraisal.parse(
+            '<think>Модель долго думает...</think>```json\n{"reaction":"joy","intensity":0.92,'
+            '"source_quote":"Ура","interest_action":"keep","topic":"release","reflection":"ok"}\n```',
+            "Ура!",
+        )
+        self.assertEqual(parsed.reaction, "warmth")
+        self.assertAlmostEqual(parsed.intensity, 0.92, places=2)
+
+        class Dead410Provider:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def complete(self, messages: Sequence[dict[str, str]], **kwargs: object) -> str:
+                self.calls += 1
+                raise LLMHTTPError(410, "model retired")
+
+            async def aclose(self) -> None:
+                return None
+
+        dead = Dead410Provider()
+        backup = FakeLLMProvider(
+            '{"reaction":"curiosity","intensity":0.8,"source_quote":"q","interest_action":"keep","topic":"t","reflection":"r"}'
+        )
+        cascade = FailoverLLMProvider([dead, backup])
+
+        for _ in range(4):
+            out = await cascade.complete([{"role": "user", "content": "hi"}], json_mode=True)
+            self.assertIn("curiosity", out)
+
+        # Dead410Provider вызывается СТРОГО 1 раз, дальше мгновенно работает backup!
+        self.assertEqual(dead.calls, 1)
+        self.assertEqual(backup.calls, 4)
 
 
 if __name__ == "__main__":
