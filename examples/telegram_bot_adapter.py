@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional, Sequence
 
-from brain_core import (
+from kristina_brain import (
     AsyncSQLiteStateStore,
     BrainEngine,
     DEFAULT_KRISTINA_PROFILE,

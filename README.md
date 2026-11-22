@@ -8,7 +8,7 @@
 
 ```python
 import asyncio
-from brain_core import AsyncSQLiteStateStore, BrainEngine, DEFAULT_KRISTINA_PROFILE
+from kristina_brain import AsyncSQLiteStateStore, BrainEngine, DEFAULT_KRISTINA_PROFILE
 
 async def main() -> None:
     store = AsyncSQLiteStateStore("agent_state.db")

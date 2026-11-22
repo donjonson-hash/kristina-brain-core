@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
-from brain_core import (
+from kristina_brain import (
     DEFAULT_KRISTINA_PROFILE,
     Appraisal,
     AsyncSQLiteStateStore,
@@ -28,8 +28,8 @@ from brain_core import (
     HTTPXChatCompletionsProvider,
     PersonaProfile,
 )
-from brain_core.llm_provider import FailoverLLMProvider, LLMHTTPError
-from brain_core.mcp_server import BrainMCPServer
+from kristina_brain.llm_provider import FailoverLLMProvider, LLMHTTPError
+from kristina_brain.mcp_server import BrainMCPServer
 
 
 class FakeLLMProvider:
@@ -133,7 +133,7 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
             def emit(self, record: logging.LogRecord) -> None:
                 log_records.append(self.format(record))
 
-        logger = logging.getLogger("brain_core.llm_provider")
+        logger = logging.getLogger("kristina_brain.llm_provider")
         logger.setLevel(logging.INFO)
         handler = ListHandler()
         logger.addHandler(handler)

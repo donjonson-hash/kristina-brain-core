@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-brain-core-mcp = "brain_core.mcp_server:main"
+brain-core-mcp = "kristina_brain.mcp_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
