@@ -277,7 +277,13 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 tool_names = {t["name"] for t in tools_resp["result"]["tools"]}
                 self.assertEqual(
                     tool_names,
-                    {"brain_get_state", "brain_ingest_event", "brain_decide_proactive", "brain_shadow_summary"},
+                    {
+                        "brain_get_state",
+                        "brain_ingest_event",
+                        "brain_decide_proactive",
+                        "brain_get_world_context",
+                        "brain_shadow_summary",
+                    },
                 )
 
                 call_resp = await mcp.handle_rpc(
@@ -402,6 +408,44 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(t_glob["effective_decision"]["action"], "none")
                 self.assertEqual(t_glob["effective_decision"]["reason"], "wants_space")
                 self.assertEqual(t_init["effective_decision"]["action"], "none")
+            finally:
+                await engine.shutdown()
+
+    async def test_v050_dual_clock_unawatuna_vs_stockholm_and_pacing(self) -> None:
+        """v0.5.0: Стокгольм (21:00 вечера) не будит собеседника в Унаватуне (01:30 ночи Asia/Colombo) + считает pacing."""
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AsyncSQLiteStateStore(Path(tmp) / "v050.db")
+            # 10:20 UTC = 11:20 Стокгольм / 15:50 Коломбо (+4.5ч)
+            clock = FixedClock(datetime(2026, 11, 22, 10, 20, tzinfo=UTC), "Europe/Stockholm")
+            engine = BrainEngine(store, clock=clock)
+            await engine.start()
+            try:
+                res = await engine.ingest_message(
+                    scope_id="tg:unawatuna",
+                    event_id="m-1",
+                    user_input="Я пишу тебе со Шри-Ланки. Домик в Унаватуне на берегу океана, до воды 50 метров.",
+                    explicit_appraisal=Appraisal(
+                        reaction="warmth",
+                        intensity=0.85,
+                        source_quote="Домик в Унаватуне на берегу океана",
+                        interest_action="keep",
+                        topic="Шри-Ланка",
+                        reflection="Тёплый живой контакт с океана",
+                        detected_location="Унаватуна, Шри-Ланка",
+                        detected_timezone=None,  # Проверяем авто-резолв Asia/Colombo по названию города!
+                        environment_cue="домик на берегу океана, 50 метров до воды",
+                    ),
+                )
+                self.assertEqual(res["world_anchor"]["counterparty_timezone"], "Asia/Colombo")
+                self.assertAlmostEqual(res["world_anchor"]["offset_hours_diff"], 4.5, places=2)
+                self.assertGreaterEqual(res["response_pacing"]["delay_seconds"], 12.0)
+                self.assertIn("Asia/Colombo", res["fast_state"]["for_llm"])
+
+                # Переводим часы на 20:00 UTC -> в Стокгольме 21:00 вечера (не ночь!), а в Унаватуне уже 01:30 ночи!
+                clock.set_utc(datetime(2026, 11, 22, 20, 0, tzinfo=UTC))
+                tick_late = await engine.heartbeat_tick("tg:unawatuna", commit_proactive_send=False)
+                self.assertEqual(tick_late["effective_decision"]["action"], "none")
+                self.assertEqual(tick_late["effective_decision"]["reason"], "counterparty_quiet_hours")
             finally:
                 await engine.shutdown()
 

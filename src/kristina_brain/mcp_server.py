@@ -67,6 +67,16 @@ MCP_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "brain_get_world_context",
+        "description": "Return counterparty physical location, resolved IANA timezone, dual-clock offset, and sensory environment cues.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_id": {"type": "string", "default": "default"},
+            },
+        },
+    },
+    {
         "name": "brain_shadow_summary",
         "description": "Return aggregated A/B divergence metrics between fast-only baseline and 12 slow organism modes.",
         "inputSchema": {
@@ -99,7 +109,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.4.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.5.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -169,6 +179,10 @@ class BrainMCPServer:
             scope_id = str(args.get("scope_id", "default"))
             commit = bool(args.get("commit_proactive_send", False))
             return await self.engine.heartbeat_tick(scope_id, commit_proactive_send=commit)
+
+        if name == "brain_get_world_context":
+            scope_id = str(args.get("scope_id", "default"))
+            return await self.engine.get_world_context(scope_id)
 
         if name == "brain_shadow_summary":
             hours = int(args.get("window_hours", 24))

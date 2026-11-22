@@ -62,6 +62,9 @@ class Appraisal:
     topic: str
     reflection: str
     dialogue: dict[str, Any] | None = None
+    detected_location: str | None = None
+    detected_timezone: str | None = None
+    environment_cue: str | None = None
 
     @classmethod
     def parse(cls, raw: str, user_input: str) -> Appraisal:
@@ -99,6 +102,14 @@ class Appraisal:
         if dialogue is not None and not isinstance(dialogue, dict):
             dialogue = None
 
+        def _opt_str(val: Any, max_len: int = 140) -> str | None:
+            if val is None or not isinstance(val, str):
+                return None
+            cleaned_v = val.strip()
+            if not cleaned_v or cleaned_v.lower() in ("null", "none", "unknown", "-"):
+                return None
+            return cleaned_v[:max_len]
+
         return cls(
             reaction=reaction,
             intensity=intensity,
@@ -107,6 +118,9 @@ class Appraisal:
             topic=topic,
             reflection=reflection,
             dialogue=dialogue,
+            detected_location=_opt_str(data.get("detected_location"), 120),
+            detected_timezone=_opt_str(data.get("detected_timezone"), 64),
+            environment_cue=_opt_str(data.get("environment_cue"), 160),
         )
 
 
@@ -135,7 +149,9 @@ class CognitiveAppraiser:
             f"Текущее локальное время ({self.profile.locale_city_label}, {self.profile.timezone}): "
             f"{local_now.isoformat()}. Оцени ТОЛЬКО последнее входящее сообщение пользователя "
             "(история дана лишь для контекста). Допустимые значения поля reaction СТРОГО из списка: "
-            "curiosity, warmth, concern, frustration, neutral.",
+            "curiosity, warmth, concern, frustration, neutral. "
+            "Если в сообщении явно указана текущая страна/город собеседника или физическая обстановка вокруг него, "
+            "заполни detected_location, detected_timezone (IANA, например Asia/Colombo) и environment_cue (иначе null).",
         ]
         if interest:
             parts.append(f"Текущий фокус интереса: {json.dumps(dict(interest), ensure_ascii=False)}")

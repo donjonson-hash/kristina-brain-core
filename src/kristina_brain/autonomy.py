@@ -116,9 +116,11 @@ class DecisionEngine:
             if current_now - last_proactive.astimezone(UTC) < self.cooldown:
                 return AutonomousDecision(action="none", intention=None, score=0.0, reason="cooldown")
 
-        # 3. Циркадный фильтр ночи (не будить собеседника)
+        # 3. DualClockGate: сначала проверяем ночь агента, затем ночь в часовом поясе собеседника
         if bool(ctx.get("is_night", False)):
             return AutonomousDecision(action="none", intention=None, score=0.0, reason="quiet_hours")
+        if bool(ctx.get("counterparty_is_night", False)):
+            return AutonomousDecision(action="none", intention=None, score=0.0, reason="counterparty_quiet_hours")
 
         # 4. Потребность в дистанции / покое
         be_alone = float(desires.get("be_alone", 0.0))

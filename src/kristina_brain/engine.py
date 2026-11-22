@@ -1,7 +1,8 @@
 """
-Главный оркестратор-фасад BrainEngine для коммерческого SDK и референс-адаптера Telegram-бота.
+Главный оркестратор-фасад BrainEngine (v0.5.0).
 Объединяет предоценку стимула, двухшкальное состояние (7 быстрых + 12 медленных мод),
-персистентные таймеры проактивности и автоматическую запись shadow-телеметрии.
+якоря мира собеседника (WorldStateAnchor), пересечение двух часовых поясов (DualClockGate),
+физиологический ритм ответа (ResponsePacingEngine) и приватную shadow-телеметрию.
 """
 
 from __future__ import annotations
@@ -22,9 +23,11 @@ from .clock import ClockProvider, SystemClock
 from .emotions import AsyncEmotionalCore, EmotionalEvent
 from .llm_provider import LLMProvider
 from .modes import AsyncOrganismModes
+from .pacing import ResponsePacingEngine
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
 from .state_store import ProactiveScheduleRecord, StateStore
+from .world import WorldStateAnchor
 
 
 class BrainEngine:
@@ -55,6 +58,10 @@ class BrainEngine:
             threshold=profile.proactive_threshold,
             cooldown=timedelta(seconds=profile.proactive_cooldown_seconds),
         )
+        self.pacing_engine = ResponsePacingEngine(
+            min_delay_seconds=profile.pacing_min_delay_seconds,
+            max_delay_seconds=profile.pacing_max_delay_seconds,
+        )
         self.shadow_telemetry = AsyncShadowTelemetryStore(store)
 
     async def start(self) -> None:
@@ -65,6 +72,24 @@ class BrainEngine:
             await self.llm.aclose()
         await self.store.close()
 
+    async def get_world_context(self, scope_id: str = "default") -> dict[str, Any]:
+        utc_now = self.clock.now_utc()
+        anchor: WorldStateAnchor = await self.store.get_world_anchor(scope_id)
+        dual = anchor.format_dual_clock_context(
+            utc_now=utc_now,
+            agent_tz=self.profile.timezone,
+            agent_city_label=self.profile.locale_city_label,
+            counterparty_quiet_hours=self.profile.counterparty_night_hours,
+        )
+        return {
+            "scope_id": scope_id,
+            "counterparty_location": anchor.counterparty_location,
+            "counterparty_timezone": anchor.counterparty_timezone,
+            "environment_cues": list(anchor.environment_cues),
+            "updated_at": anchor.updated_at.isoformat() if anchor.updated_at else None,
+            **dual,
+        }
+
     async def ingest_message(
         self,
         *,
@@ -74,12 +99,6 @@ class BrainEngine:
         history: Sequence[Mapping[str, Any]] = (),
         explicit_appraisal: Appraisal | None = None,
     ) -> dict[str, Any]:
-        """
-        Полный синхронно-логический такт обработки входящего сообщения:
-        1) Вычисляет Appraisal через LLM (или принимает готовый explicit_appraisal в режиме MCP/SDK).
-        2) Атомарно и идемпотентно эволюционирует 7 быстрых эмоций и 12 медленных мод.
-        3) Обновляет персистентную отметку last_user_activity в БД (вместо RAM-словарей bot.py).
-        """
         utc_now = self.clock.now_utc()
         ev = EmotionalEvent.from_message(scope_id, event_id, user_input)
 
@@ -116,7 +135,18 @@ class BrainEngine:
             at=utc_now,
         )
 
-        # Обновляем персистентное расписание активности пользователя (AUD-05 fix)
+        # Обновляем якорь физического мира собеседника, если в реплике обнаружены локация/таймзона/детали окружения
+        anchor = await self.store.get_world_anchor(scope_id)
+        if fast_state.get("event_applied", False) and appraisal is not None:
+            if appraisal.detected_location or appraisal.detected_timezone or appraisal.environment_cue:
+                anchor = anchor.merge_signal(
+                    location=appraisal.detected_location,
+                    timezone_name=appraisal.detected_timezone,
+                    environment_cue=appraisal.environment_cue,
+                    at=utc_now,
+                )
+                await self.store.upsert_world_anchor(anchor)
+
         if fast_state.get("event_applied", False):
             await self.store.upsert_proactive_schedule(
                 ProactiveScheduleRecord(
@@ -129,7 +159,19 @@ class BrainEngine:
                 )
             )
 
+        dual_clock = anchor.format_dual_clock_context(
+            utc_now=utc_now,
+            agent_tz=self.profile.timezone,
+            agent_city_label=self.profile.locale_city_label,
+            counterparty_quiet_hours=self.profile.counterparty_night_hours,
+        )
+        if dual_clock["prompt_line"]:
+            fast_state = dict(fast_state)
+            fast_state["for_llm"] = f"{fast_state['for_llm']} {dual_clock['prompt_line']}"
+
+        pacing = self.pacing_engine.calculate(fast_state, user_input_length=len(user_input))
         dominant_modes = await self.modes.dominant(scope_id, limit=3)
+
         return {
             "scope_id": scope_id,
             "event_id": event_id,
@@ -141,10 +183,24 @@ class BrainEngine:
                 "topic": appraisal.topic,
                 "interest_action": appraisal.interest_action,
                 "reflection": appraisal.reflection,
+                "detected_location": appraisal.detected_location,
+                "detected_timezone": appraisal.detected_timezone,
+                "environment_cue": appraisal.environment_cue,
             }
             if appraisal
             else None,
             "fast_state": fast_state,
+            "response_pacing": {
+                "delay_seconds": pacing.delay_seconds,
+                "verbosity_hint": pacing.verbosity_hint,
+                "sensory_curiosity_high": pacing.sensory_curiosity_high,
+            },
+            "world_anchor": {
+                "counterparty_location": anchor.counterparty_location,
+                "counterparty_timezone": anchor.counterparty_timezone,
+                "environment_cues": list(anchor.environment_cues),
+                **dual_clock,
+            },
             "dominant_modes": [
                 {"name": m.name, "amplitude": m.amplitude, "baseline": m.baseline, "deviation": m.deviation}
                 for m in dominant_modes
@@ -157,15 +213,9 @@ class BrainEngine:
         *,
         commit_proactive_send: bool = False,
     ) -> dict[str, Any]:
-        """
-        Минутный/периодический автономный такт:
-        - Релаксирует быстрые эмоции и 12 медленных мод по экспоненте полураспада.
-        - Вычисляет базовое и shadow-решение проактивности с учётом персистентного кулдауна.
-        - Пишет обезличенную строку в shadow_decision_telemetry.
-        - Выбор активного решения управляется флагом profile.enable_slow_modes_in_decisions.
-        """
         utc_now = self.clock.now_utc()
         schedule = await self.store.get_proactive_schedule(scope_id)
+        anchor = await self.store.get_world_anchor(scope_id)
 
         hours_since_contact = (
             max(0.0, (utc_now - schedule.last_user_activity).total_seconds() / 3600.0)
@@ -173,7 +223,6 @@ class BrainEngine:
             else 4.0
         )
 
-        # Сброс суточного счётчика, если с последнего проактивного контакта прошло >24ч
         count_24h = schedule.proactive_count_24h
         if schedule.last_proactive_at and (utc_now - schedule.last_proactive_at) >= timedelta(hours=24):
             count_24h = 0
@@ -183,12 +232,19 @@ class BrainEngine:
             context={"hours_since_contact": hours_since_contact},
         )
         projection = await self.modes.project(scope_id, at=utc_now)
+        dual_clock = anchor.format_dual_clock_context(
+            utc_now=utc_now,
+            agent_tz=self.profile.timezone,
+            agent_city_label=self.profile.locale_city_label,
+            counterparty_quiet_hours=self.profile.counterparty_night_hours,
+        )
 
         ctx = {
             "hours_since_contact": hours_since_contact,
             "last_proactive": schedule.last_proactive_at,
             "proactive_count_24h": count_24h,
             "is_night": fast_state["is_night"],
+            "counterparty_is_night": dual_clock["counterparty_is_night"],
         }
 
         report: ShadowDecisionReport = evaluate_with_shadow(
@@ -226,6 +282,10 @@ class BrainEngine:
                 )
             )
 
+        for_llm = fast_state["for_llm"]
+        if dual_clock["prompt_line"]:
+            for_llm = f"{for_llm} {dual_clock['prompt_line']}"
+
         return {
             "scope_id": scope_id,
             "effective_decision": {
@@ -237,6 +297,7 @@ class BrainEngine:
                 if self.profile.enable_slow_modes_in_decisions
                 else "baseline_fast_only",
             },
+            "world_clock": dual_clock,
             "shadow_comparison": {
                 "decision_changed": report.decision_changed,
                 "max_abs_score_delta": report.max_abs_score_delta,
@@ -244,5 +305,5 @@ class BrainEngine:
                 "shadow_action": report.shadow.action,
                 "shifted_modes": list(projection.shifted_modes),
             },
-            "fast_state_for_llm": fast_state["for_llm"],
+            "fast_state_for_llm": for_llm,
         }

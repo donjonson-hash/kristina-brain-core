@@ -59,6 +59,9 @@ class PersonaProfile:
     timezone: str = "UTC"
     locale_city_label: str = "UTC"
     night_hours: tuple[int, int] = (23, 7)  # (start_hour, end_hour) в локальной таймзоне агента
+    counterparty_night_hours: tuple[int, int] = (23, 8)  # не будить собеседника в его поясе
+    pacing_min_delay_seconds: float = 12.0
+    pacing_max_delay_seconds: float = 75.0
     traits: BigFiveTraits = field(default_factory=BigFiveTraits)
     proactive_threshold: float = 0.62
     proactive_cooldown_seconds: int = 7200
@@ -112,6 +115,12 @@ class PersonaProfile:
             timezone=str(data.get("timezone", "UTC")),
             locale_city_label=str(data.get("locale_city_label", data.get("timezone", "UTC"))),
             night_hours=night_tuple,
+            counterparty_night_hours=(
+                int(data.get("counterparty_night_hours", [23, 8])[0]),
+                int(data.get("counterparty_night_hours", [23, 8])[1]),
+            ),
+            pacing_min_delay_seconds=float(data.get("pacing_min_delay_seconds", 12.0)),
+            pacing_max_delay_seconds=float(data.get("pacing_max_delay_seconds", 75.0)),
             traits=traits,
             proactive_threshold=float(data.get("proactive_threshold", 0.62)),
             proactive_cooldown_seconds=int(data.get("proactive_cooldown_seconds", 7200)),
@@ -148,7 +157,10 @@ DEFAULT_KRISTINA_PROFILE = PersonaProfile(
         "Ты модуль когнитивной предоценки персоны Кристины. "
         "Проанализируй реплику собеседника и верни строго JSON с ключами: "
         "reaction (curiosity|warmth|concern|frustration|neutral), intensity (0..1), "
-        "source_quote, interest_action (keep|open|resolve|ignore), topic, reflection."
+        "source_quote, interest_action (keep|open|resolve|ignore), topic, reflection, "
+        "а если собеседник упомянул где он находится или какая вокруг обстановка — опциональные поля "
+        "detected_location (строка города/страны), detected_timezone (IANA, напр. Asia/Colombo), "
+        "environment_cue (краткая деталь окружения, напр. домик у океана)."
     ),
     persona_system_prompt=(
         "Ты Кристина, 25-летняя UX-дизайнер из Стокгольма (Södermalm). "

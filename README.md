@@ -9,9 +9,11 @@ Most AI agent frameworks solve *what an agent remembers* (passive RAG / context 
 - **Non-Blocking Multi-Tenant Persistence (`AsyncSQLiteStateStore`)**: serialized WAL-mode SQLite engine with cryptographic SHA-256 event idempotency and persistent outreach cooldowns that survive container/systemd restarts.
 - **Hybrid Cloud → Local LLM Cascade (`FailoverLLMProvider` + `OllamaChatProvider`)**: native Ollama `/api/chat` (`think=False`, `format="json"`) and OpenAI-compatible HTTPX pool with automatic circuit breaker (instant permanent trip on `HTTP 401/403/404/410`, timed cooldown on `429/5xx`).
 - **PII-Free Shadow A/B Telemetry (`AsyncShadowTelemetryStore`)**: compares baseline vs. 12-mode counterfactual decisions on live traffic without storing message text.
+- **World State Anchors & Dual-Clock Quiet Hours (`WorldStateAnchor` + `DualClockGate`)**: single-pass extraction of counterparty location, IANA timezone, and sensory environment cues, preventing cross-timezone night wake-ups (`counterparty_quiet_hours`).
+- **Physiological Response Pacing (`ResponsePacingEngine`)**: deterministic typing/reply delay (`delay_seconds`), verbosity hints, and sensory curiosity flags.
 - **Built-in MCP Server (`brain-core-mcp`)**: zero-overhead JSON-RPC 2.0 stdio server for Hermes Agent, Claude Desktop, Cursor, and custom runtimes.
 
-## Live Model & B2B Pilot Benchmarks (v0.4.0)
+## Live Model & B2B Pilot Benchmarks (v0.5.0)
 
 | Provider / Contour | JSON Validity | Appraisal Accuracy | Avg Latency | Role in Cascade |
 | :--- | :---: | :---: | :---: | :--- |
@@ -24,7 +26,7 @@ In a 14-day multi-tenant B2B Customer Success simulation across 3 polar accounts
 ## Installation
 
 ```bash
-pip install "kristina-brain-core @ git+[https://github.com/donjonson-hash/kristina-brain-core.git@v0.4.0](https://github.com/donjonson-hash/kristina-brain-core.git@v0.4.0)"
+pip install "kristina-brain-core @ git+[https://github.com/donjonson-hash/kristina-brain-core.git@v0.5.0](https://github.com/donjonson-hash/kristina-brain-core.git@v0.5.0)"
 import asyncio
 from kristina_brain import (
     AsyncSQLiteStateStore,

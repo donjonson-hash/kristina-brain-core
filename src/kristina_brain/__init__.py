@@ -23,6 +23,7 @@ from .llm_provider import (
     OllamaChatProvider,
 )
 from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
+from .pacing import ResponsePacing, ResponsePacingEngine
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
 from .state_store import (
@@ -30,6 +31,7 @@ from .state_store import (
     ProactiveScheduleRecord,
     StateStore,
 )
+from .world import WorldStateAnchor, resolve_iana_timezone
 
 __all__ = [
     "ClockProvider",
@@ -64,6 +66,10 @@ __all__ = [
     "evaluate_with_shadow",
     "AsyncShadowTelemetryStore",
     "BrainEngine",
+    "ResponsePacing",
+    "ResponsePacingEngine",
+    "WorldStateAnchor",
+    "resolve_iana_timezone",
 ]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

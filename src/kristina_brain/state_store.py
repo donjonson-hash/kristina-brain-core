@@ -25,6 +25,8 @@ from typing import (
     runtime_checkable,
 )
 
+from .world import WorldStateAnchor
+
 T = TypeVar("T")
 
 
@@ -79,6 +81,10 @@ class StateStore(Protocol):
     # --- Персистентные кулдауны проактивности (AUD-05) ---
     async def get_proactive_schedule(self, scope_id: str) -> ProactiveScheduleRecord: ...
     async def upsert_proactive_schedule(self, record: ProactiveScheduleRecord) -> None: ...
+
+    # --- Якоря физического контекста и часового пояса собеседника (v0.5.0) ---
+    async def get_world_anchor(self, scope_id: str) -> WorldStateAnchor: ...
+    async def upsert_world_anchor(self, anchor: WorldStateAnchor) -> None: ...
 
     # --- Приватная Shadow-телеметрия решений без PII ---
     async def insert_shadow_telemetry_once(self, row: Mapping[str, Any]) -> bool: ...
@@ -228,6 +234,19 @@ class AsyncSQLiteStateStore:
                         next_opportunity_at TEXT,
                         proactive_count_24h INTEGER NOT NULL DEFAULT 0,
                         recent_intentions_json TEXT NOT NULL DEFAULT '[]',
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+
+                # 5b. Якоря физического мира и таймзоны собеседника (v0.5.0)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS brain_world_anchors (
+                        scope_id TEXT PRIMARY KEY,
+                        counterparty_location TEXT,
+                        counterparty_timezone TEXT,
+                        environment_cues_json TEXT NOT NULL DEFAULT '[]',
                         updated_at TEXT NOT NULL
                     )
                     """
@@ -619,3 +638,61 @@ class AsyncSQLiteStateStore:
             return [dict(r) for r in rows]
 
         return await self._run(_op)
+
+    async def get_world_anchor(self, scope_id: str) -> WorldStateAnchor:
+        def _op(conn: sqlite3.Connection) -> WorldStateAnchor:
+            row = conn.execute(
+                """
+                SELECT counterparty_location, counterparty_timezone, environment_cues_json, updated_at
+                FROM brain_world_anchors
+                WHERE scope_id = ?
+                """,
+                (scope_id,),
+            ).fetchone()
+            if row is None:
+                return WorldStateAnchor(scope_id=scope_id)
+            cues = tuple(json.loads(row["environment_cues_json"] or "[]"))
+            return WorldStateAnchor(
+                scope_id=scope_id,
+                counterparty_location=row["counterparty_location"],
+                counterparty_timezone=row["counterparty_timezone"],
+                environment_cues=cues,
+                updated_at=_parse_iso_utc(row["updated_at"]),
+            )
+
+        return await self._run(_op)
+
+    async def upsert_world_anchor(self, anchor: WorldStateAnchor) -> None:
+        now_iso = (anchor.updated_at or datetime.now(UTC)).isoformat()
+        cues_json = json.dumps(list(anchor.environment_cues[-5:]), ensure_ascii=False)
+
+        def _op(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO brain_world_anchors(
+                        scope_id, counterparty_location, counterparty_timezone, environment_cues_json, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(scope_id) DO UPDATE SET
+                        counterparty_location = excluded.counterparty_location,
+                        counterparty_timezone = excluded.counterparty_timezone,
+                        environment_cues_json = excluded.environment_cues_json,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        anchor.scope_id,
+                        anchor.counterparty_location,
+                        anchor.counterparty_timezone,
+                        cues_json,
+                        now_iso,
+                    ),
+                )
+                conn.execute("COMMIT;")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        await self._run(_op)
