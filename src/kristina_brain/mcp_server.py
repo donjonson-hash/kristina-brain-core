@@ -22,6 +22,7 @@ from typing import Any
 from .appraisal import Appraisal
 from .engine import BrainEngine
 from .llm_provider import FailoverLLMProvider, LLMProvider, OllamaChatProvider
+from .packs import load_vertical_pack
 from .postgres_store import create_state_store
 from .profile import DEFAULT_KRISTINA_PROFILE, PersonaProfile
 
@@ -117,6 +118,32 @@ MCP_TOOLS_SCHEMA = [
         },
     },
     {
+        "name": "brain_save_artifact",
+        "description": "Save or update a persistent creative draft/project artifact so the agent quotes consistent excerpts across weeks.",
+        "inputSchema": {
+            "type": "object",
+            "required": ["scope_id", "artifact_id", "title", "excerpt"],
+            "properties": {
+                "scope_id": {"type": "string"},
+                "artifact_id": {"type": "string"},
+                "title": {"type": "string"},
+                "excerpt": {"type": "string"},
+                "status_note": {"type": "string", "default": "черновик в работе"},
+            },
+        },
+    },
+    {
+        "name": "brain_list_artifacts",
+        "description": "List saved creative drafts and project artifacts for a scope_id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "scope_id": {"type": "string", "default": "default"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+            },
+        },
+    },
+    {
         "name": "brain_shadow_summary",
         "description": "Return aggregated A/B divergence metrics between fast-only baseline and 12 slow organism modes.",
         "inputSchema": {
@@ -149,7 +176,7 @@ class BrainMCPServer:
             if method == "initialize":
                 result = {
                     "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "kristina-brain-core", "version": "0.8.0"},
+                    "serverInfo": {"name": "kristina-brain-core", "version": "0.9.0"},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -266,6 +293,39 @@ class BrainMCPServer:
                 ]
             }
 
+        if name == "brain_save_artifact":
+            saved = await self.engine.save_artifact(
+                scope_id=str(args["scope_id"]),
+                artifact_id=str(args["artifact_id"]),
+                title=str(args["title"]),
+                excerpt=str(args["excerpt"]),
+                status_note=str(args.get("status_note", "черновик в работе")),
+            )
+            return {
+                "artifact_id": saved.artifact_id,
+                "title": saved.title,
+                "status_note": saved.status_note,
+                "updated_at": saved.updated_at.isoformat(),
+            }
+
+        if name == "brain_list_artifacts":
+            arts = await self.engine.get_artifacts(
+                str(args.get("scope_id", "default")),
+                limit=int(args.get("limit", 5)),
+            )
+            return {
+                "artifacts": [
+                    {
+                        "artifact_id": a.artifact_id,
+                        "title": a.title,
+                        "excerpt": a.excerpt,
+                        "status_note": a.status_note,
+                        "updated_at": a.updated_at.isoformat(),
+                    }
+                    for a in arts
+                ]
+            }
+
         if name == "brain_shadow_summary":
             hours = int(args.get("window_hours", 24))
             return await self.engine.shadow_telemetry.summary(window_hours=hours)
@@ -276,7 +336,13 @@ class BrainMCPServer:
 async def run_stdio_server() -> None:
     db_path = os.getenv("BRAIN_CORE_DB", "kristina_state.db")
     profile_path = os.getenv("BRAIN_CORE_PROFILE_JSON")
-    profile = PersonaProfile.from_json_file(profile_path) if profile_path else DEFAULT_KRISTINA_PROFILE
+    pack_name = os.getenv("BRAIN_CORE_PACK")
+    if profile_path:
+        profile = PersonaProfile.from_json_file(profile_path)
+    elif pack_name:
+        profile = load_vertical_pack(pack_name)
+    else:
+        profile = DEFAULT_KRISTINA_PROFILE
     store = create_state_store(db_path)
     ollama_model = os.getenv("BRAIN_CORE_OLLAMA_MODEL")
     ollama_host = os.getenv("BRAIN_CORE_OLLAMA_HOST", "http://127.0.0.1:11434")

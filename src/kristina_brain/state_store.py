@@ -25,6 +25,7 @@ from typing import (
     runtime_checkable,
 )
 
+from .artifacts import CreativeArtifact
 from .intentions import DurableIntention
 from .world import WorldStateAnchor
 
@@ -105,6 +106,10 @@ class StateStore(Protocol):
         updated_at_iso: str,
     ) -> bool: ...
     async def list_intentions(self, scope_id: str, *, limit: int = 10) -> list[DurableIntention]: ...
+
+    # --- Слот устойчивых творческих черновиков / проектов агента (v0.9.0) ---
+    async def upsert_artifact(self, artifact: CreativeArtifact) -> None: ...
+    async def list_artifacts(self, scope_id: str, *, limit: int = 5) -> list[CreativeArtifact]: ...
 
     # --- Приватная Shadow-телеметрия решений без PII ---
     async def insert_shadow_telemetry_once(self, row: Mapping[str, Any]) -> bool: ...
@@ -307,6 +312,21 @@ class AsyncSQLiteStateStore:
                 )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_brain_intentions_scope_updated ON brain_durable_intentions(scope_id, updated_at DESC)"
+                )
+
+                # 5e. Творческие черновики и заметки агента (v0.9.0)
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS brain_creative_artifacts (
+                        scope_id TEXT NOT NULL,
+                        artifact_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        excerpt TEXT NOT NULL,
+                        status_note TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (scope_id, artifact_id)
+                    )
+                    """
                 )
 
                 # 6. Shadow Decision Telemetry (совместима со схемой shadow_telemetry.py)
@@ -966,5 +986,66 @@ class AsyncSQLiteStateStore:
                 (scope_id, int(limit)),
             ).fetchall()
             return [self._decode_intention_row(r) for r in rows]
+
+        return await self._run(_op)
+
+    async def upsert_artifact(self, artifact: CreativeArtifact) -> None:
+        ts = artifact.updated_at.astimezone(UTC).isoformat()
+
+        def _op(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE;")
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO brain_creative_artifacts(
+                        scope_id, artifact_id, title, excerpt, status_note, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scope_id, artifact_id) DO UPDATE SET
+                        title = excluded.title,
+                        excerpt = excluded.excerpt,
+                        status_note = excluded.status_note,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        artifact.scope_id,
+                        artifact.artifact_id,
+                        artifact.title[:160],
+                        artifact.excerpt[:2000],
+                        artifact.status_note[:160],
+                        ts,
+                    ),
+                )
+                conn.execute("COMMIT;")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK;")
+                raise
+
+        await self._run(_op)
+
+    async def list_artifacts(self, scope_id: str, *, limit: int = 5) -> list[CreativeArtifact]:
+        def _op(conn: sqlite3.Connection) -> list[CreativeArtifact]:
+            rows = conn.execute(
+                """
+                SELECT scope_id, artifact_id, title, excerpt, status_note, updated_at
+                FROM brain_creative_artifacts
+                WHERE scope_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (scope_id, int(limit)),
+            ).fetchall()
+            return [
+                CreativeArtifact(
+                    artifact_id=str(r["artifact_id"]),
+                    scope_id=str(r["scope_id"]),
+                    title=str(r["title"]),
+                    excerpt=str(r["excerpt"]),
+                    status_note=str(r["status_note"]),
+                    updated_at=_parse_iso_utc(r["updated_at"]) or datetime.now(UTC),
+                )
+                for r in rows
+            ]
 
         return await self._run(_op)

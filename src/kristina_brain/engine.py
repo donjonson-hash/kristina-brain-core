@@ -12,6 +12,7 @@ from datetime import timedelta
 from typing import Any
 
 from .appraisal import Appraisal, CognitiveAppraiser
+from .artifacts import CreativeArtifact
 from .autonomy import (
     AutonomousDecision,
     DecisionEngine,
@@ -195,7 +196,9 @@ class BrainEngine:
         )
         recent_intentions_list = await self.intentions.list_for_scope(scope_id, limit=3)
         intention_line = self.intentions.format_prompt_context(recent_intentions_list)
-        extra_lines = [x for x in (dual_clock["prompt_line"], intention_line) if x]
+        artifacts = await self.store.list_artifacts(scope_id, limit=1)
+        artifact_line = artifacts[0].format_for_prompt() if artifacts else ""
+        extra_lines = [x for x in (dual_clock["prompt_line"], intention_line, artifact_line) if x]
         if extra_lines:
             fast_state = dict(fast_state)
             fast_state["for_llm"] = f"{fast_state['for_llm']} {' '.join(extra_lines)}"
@@ -390,3 +393,26 @@ class BrainEngine:
             "pending_question": updated.get("pending_question"),
             "proactive_since_user": updated.get("proactive_since_user", 0),
         }
+
+    async def save_artifact(
+        self,
+        *,
+        scope_id: str,
+        artifact_id: str,
+        title: str,
+        excerpt: str,
+        status_note: str = "черновик в работе",
+    ) -> CreativeArtifact:
+        art = CreativeArtifact(
+            artifact_id=artifact_id.strip(),
+            scope_id=scope_id.strip(),
+            title=title.strip(),
+            excerpt=excerpt.strip(),
+            status_note=status_note.strip(),
+            updated_at=self.clock.now_utc(),
+        )
+        await self.store.upsert_artifact(art)
+        return art
+
+    async def get_artifacts(self, scope_id: str = "default", *, limit: int = 5) -> list[CreativeArtifact]:
+        return await self.store.list_artifacts(scope_id, limit=limit)

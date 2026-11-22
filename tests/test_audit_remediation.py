@@ -31,6 +31,7 @@ from kristina_brain import (
     StateStore,
     create_control_plane_app,
     create_state_store,
+    load_vertical_pack,
     sign_webhook_payload,
 )
 from kristina_brain.llm_provider import FailoverLLMProvider, LLMHTTPError
@@ -290,6 +291,8 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
                         "brain_record_reply",
                         "brain_schedule_intention",
                         "brain_list_intentions",
+                        "brain_save_artifact",
+                        "brain_list_artifacts",
                         "brain_shadow_summary",
                     },
                 )
@@ -636,6 +639,40 @@ class BrainCoreAuditRemediationTests(unittest.IsolatedAsyncioTestCase):
 
                 sig = sign_webhook_payload("wh-sec-1", b'{"ok":true}')
                 self.assertTrue(sig.startswith("sha256="))
+
+    async def test_v090_vertical_packs_and_sveavagen_creative_artifact_continuity(self) -> None:
+        """v0.9.0: 3 коммерческих пака (b2b_csm, ai_companion, game_npc) и непрерывность черновика про Свеавеген через недели."""
+        b2b = load_vertical_pack("b2b_csm")
+        comp = load_vertical_pack("ai_companion")
+        npc = load_vertical_pack("game_npc")
+        self.assertLess(b2b.pacing_max_delay_seconds, comp.pacing_min_delay_seconds)
+        self.assertLess(npc.pacing_min_delay_seconds, 1.0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = create_state_store(Path(tmp) / "v090.db")
+            clock = FixedClock(datetime(2026, 11, 22, 11, 20, tzinfo=UTC), "Europe/Stockholm")
+            engine = BrainEngine(store, profile=comp, clock=clock)
+            await engine.start()
+            try:
+                await engine.save_artifact(
+                    scope_id="tg:author",
+                    artifact_id="draft-sveavagen",
+                    title="Город без достопримечательностей",
+                    excerpt="Я стою на остановке на Свеавеген, и только женщина в жёлтой куртке смотрит на дорогу по-настоящему.",
+                    status_note="черновик — правлю второй абзац",
+                )
+                # Через 14 дней собеседник спрашивает про черновик — он на месте в промпте for_llm!
+                clock.advance(hours=24 * 14)
+                res = await engine.ingest_message(
+                    scope_id="tg:author",
+                    event_id="ev-2weeks",
+                    user_input="Как поживает твой черновик про остановку?",
+                    explicit_appraisal=Appraisal("curiosity", 0.8, "черновик", "keep", "эссе", "интерес к тексту"),
+                )
+                self.assertIn("Город без достопримечательностей", res["fast_state"]["for_llm"])
+                self.assertIn("Свеавеген", res["fast_state"]["for_llm"])
+            finally:
+                await engine.shutdown()
 
 
 if __name__ == "__main__":

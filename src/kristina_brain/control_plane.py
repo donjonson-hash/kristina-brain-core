@@ -1,5 +1,5 @@
 """
-Commercial Cloud Control Plane MVP (v0.8.0) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
+Commercial Cloud Control Plane MVP (v0.9.0) — FastAPI REST Gateway, Signed Webhooks & Live Dashboard.
 Запускается командой `brain-core-cloud` (требует `pip install 'kristina-brain-core[cloud]'`).
 
 Возможности платного контура ($29 Starter / $149 Pro):
@@ -80,7 +80,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <input id="scopeId" type="text" value="tenant:acme-corp" placeholder="scope_id" style="width:180px">
     <button onclick="refreshAll()">Refresh Telemetry</button>
     <button class="secondary" onclick="triggerHeartbeat()">Run Heartbeat Tick</button>
-    <span class="badge" id="versionBadge">v0.8.0</span>
+    <span class="badge" id="versionBadge">v0.9.0</span>
   </div>
 </header>
 
@@ -251,7 +251,7 @@ def create_control_plane_app(
 
     app = FastAPI(
         title="Kristina Brain Engine — Cloud Control Plane",
-        version="0.8.0",
+        version="0.9.0",
         lifespan=lifespan,
     )
 
@@ -269,7 +269,7 @@ def create_control_plane_app(
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
-        return {"status": "ok", "version": "0.8.0"}
+        return {"status": "ok", "version": "0.9.0"}
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .artifacts import CreativeArtifact
 from .intentions import DurableIntention
 from .state_store import AsyncSQLiteStateStore, ProactiveScheduleRecord, StateStore
 from .world import WorldStateAnchor
@@ -155,6 +156,17 @@ POSTGRES_DDL_STATEMENTS: tuple[str, ...] = (
         mode_deviations_json JSONB NOT NULL,
         shifted_modes_json JSONB NOT NULL,
         version INTEGER NOT NULL DEFAULT 1
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS brain_creative_artifacts (
+        scope_id TEXT NOT NULL,
+        artifact_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        excerpt TEXT NOT NULL,
+        status_note TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL,
+        PRIMARY KEY (scope_id, artifact_id)
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_pg_shadow_observed ON shadow_decision_telemetry(observed_at DESC)",
@@ -721,6 +733,55 @@ class AsyncPostgresStateStore:
                 *params,
             )
             return [dict(r) for r in rows]
+
+    async def upsert_artifact(self, artifact: CreativeArtifact) -> None:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                INSERT INTO brain_creative_artifacts(
+                    scope_id, artifact_id, title, excerpt, status_note, updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+                ON CONFLICT (scope_id, artifact_id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    excerpt = EXCLUDED.excerpt,
+                    status_note = EXCLUDED.status_note,
+                    updated_at = EXCLUDED.updated_at
+                """,
+                artifact.scope_id,
+                artifact.artifact_id,
+                artifact.title[:160],
+                artifact.excerpt[:2000],
+                artifact.status_note[:160],
+                artifact.updated_at,
+            )
+
+    async def list_artifacts(self, scope_id: str, *, limit: int = 5) -> list[CreativeArtifact]:
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT scope_id, artifact_id, title, excerpt, status_note, updated_at
+                FROM brain_creative_artifacts
+                WHERE scope_id = $1
+                ORDER BY updated_at DESC
+                LIMIT $2
+                """,
+                scope_id,
+                int(limit),
+            )
+            return [
+                CreativeArtifact(
+                    artifact_id=str(r["artifact_id"]),
+                    scope_id=str(r["scope_id"]),
+                    title=str(r["title"]),
+                    excerpt=str(r["excerpt"]),
+                    status_note=str(r["status_note"]),
+                    updated_at=_dt_utc(r["updated_at"]) or datetime.now(UTC),
+                )
+                for r in rows
+            ]
 
 
 def create_state_store(dsn_or_path: str | Path = "kristina_state.db") -> StateStore:

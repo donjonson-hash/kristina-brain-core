@@ -5,6 +5,7 @@ Kristina / SomaCore Brain Engine — выделенное асинхронное
 """
 
 from .appraisal import Appraisal, CognitiveAppraiser
+from .artifacts import CreativeArtifact
 from .autonomy import (
     AutonomousDecision,
     DecisionEngine,
@@ -27,6 +28,7 @@ from .llm_provider import (
 )
 from .modes import DEFAULT_MODE_DEFINITIONS, AsyncOrganismModes, ModeDefinition, ModeState, OrganismProjection
 from .pacing import ResponsePacing, ResponsePacingEngine
+from .packs import AI_COMPANION_PACK, B2B_CSM_PACK, GAME_NPC_PACK, VERTICAL_PACKS, load_vertical_pack
 from .postgres_store import AsyncPostgresStateStore, create_state_store
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, ModeSpec, PersonaProfile
 from .shadow import AsyncShadowTelemetryStore
@@ -63,7 +65,13 @@ __all__ = [
     "OrganismProjection",
     "AsyncOrganismModes",
     "DEFAULT_MODE_DEFINITIONS",
+    "AI_COMPANION_PACK",
     "Appraisal",
+    "B2B_CSM_PACK",
+    "CreativeArtifact",
+    "GAME_NPC_PACK",
+    "VERTICAL_PACKS",
+    "load_vertical_pack",
     "CognitiveAppraiser",
     "AutonomousDecision",
     "ShadowDecisionReport",
@@ -84,4 +92,4 @@ __all__ = [
     "resolve_iana_timezone",
 ]
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
