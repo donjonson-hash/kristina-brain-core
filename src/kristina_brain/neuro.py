@@ -698,10 +698,21 @@ class SynapticGraphEngine:
         scope_id: str = "default",
         *,
         chem: NeuromodulatorField | None = None,
+        read_only: bool = False,
     ) -> dict[str, Any]:
+        """Снимок графа. read_only=True ничего не пишет в стор: отсутствующий
+        контур показывается как дефолтный шаблон in-memory без persist."""
         now = self.clock.now_utc()
-        neurons, synapses = await self.ensure_circuit(scope_id, at=now)
-        raw = await self.store.load_neural_graph(scope_id) or {}
+        if read_only:
+            raw = await self.store.load_neural_graph(scope_id)
+            if raw is None:
+                neurons, synapses = self._build_default_circuit(now)
+                raw = {}
+            else:
+                neurons, synapses = self._deserialize(raw, now)
+        else:
+            neurons, synapses = await self.ensure_circuit(scope_id, at=now)
+            raw = await self.store.load_neural_graph(scope_id) or {}
         eff_chem = chem or NeuromodulatorField(
             dopamine=0.5, noradrenaline=0.2, serotonin=0.5, oxytocin=0.4, gaba=0.15
         )

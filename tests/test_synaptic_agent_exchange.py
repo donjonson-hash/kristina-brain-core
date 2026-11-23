@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -275,3 +276,49 @@ async def test_concurrent_register_custom_synapse_keeps_all_edges(tmp_path: Path
         assert not missing, f"lost synapses under concurrency: {missing}"
     finally:
         await engine.shutdown()
+
+
+def test_online_observatory_live_get_is_read_only_and_openapi_builds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Публичный GET-снимок не пишет в БД, а /openapi.json собирается.
+
+    Регрессии v1.2.0: (1) GET создавал нейрограф + 12 строк модов на каждый новый
+    scope_id — анонимное размножение строк; (2) /openapi.json отдавал 500 из-за
+    нерезолвимой аннотации `-> HTMLResponse` (fastapi импортируется в control_plane
+    локально, имени нет в module globals) — /docs и /redoc были сломаны.
+    """
+    db_file = str(tmp_path / "obs_readonly.db")
+    monkeypatch.setenv("BRAIN_CORE_DB", db_file)
+    monkeypatch.setenv("BRAIN_CONTROL_API_KEY", "ro-test-key")
+
+    sig = inspect.signature(create_control_plane_app)
+    kwargs: dict[str, Any] = {}
+    if "db_path" in sig.parameters:
+        kwargs["db_path"] = db_file
+    app = create_control_plane_app(**kwargs)
+
+    with TestClient(app) as client:
+        r_schema = client.get("/openapi.json")
+        assert r_schema.status_code == 200, f"openapi schema broken: {r_schema.status_code}"
+
+        con = sqlite3.connect(db_file)
+
+        def counts() -> dict[str, int]:
+            tables = [r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            return {
+                t: con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                for t in sorted(tables)
+            }
+
+        before = counts()
+        for scope in ("probe:fresh-ro-1", "probe:fresh-ro-2"):
+            r = client.get(f"/neuro-studio/api/live/{scope}")
+            assert r.status_code == 200
+            d = r.json()
+            assert d["status"] == "online" and d["pii_redacted"] is True
+            assert d["pulse_seq"] == 0
+            assert len(d["neurons"]) >= 9  # шаблон показывается и без persist
+        after = counts()
+        assert before == after, f"GET mutated the store: {before} -> {after}"
+        con.close()

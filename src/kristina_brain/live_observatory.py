@@ -51,16 +51,21 @@ def _has_valid_api_key(request: Request, explicit_key: str | None = None) -> boo
     return hmac.compare_digest(candidate.encode("utf-8"), configured.encode("utf-8"))
 
 
-async def _build_zero_pii_snapshot(engine: Any, scope_id: str) -> dict[str, Any]:
+async def _build_zero_pii_snapshot(
+    engine: Any, scope_id: str, *, read_only: bool = False
+) -> dict[str, Any]:
     fast_raw = await engine.emotions.get_emotional_state(scope_id)
-    mode_map = await engine.modes.snapshot(scope_id)
+    if read_only:
+        mode_map = await engine.modes.snapshot_readonly(scope_id)
+    else:
+        mode_map = await engine.modes.snapshot(scope_id)
     is_quiet = bool(fast_raw.get("is_night", False))
     chem = NeuromodulatorField.from_brain_state(
         fast_raw,
         mode_map,
         is_quiet_hours=is_quiet,
     )
-    graph = await engine.synapses.inspect_graph(scope_id, chem=chem)
+    graph = await engine.synapses.inspect_graph(scope_id, chem=chem, read_only=read_only)
 
     raw_vec = fast_raw.get("state", {})
     clean_emotions: dict[str, float] = {}
@@ -108,14 +113,14 @@ def create_observatory_router(
         return eng
 
     @router.get("/neuro-studio", response_class=HTMLResponse)
-    async def neuro_studio_page() -> HTMLResponse:
+    async def neuro_studio_page():
         return HTMLResponse(content=NEURO_STUDIO_HTML)
 
     @router.get("/neuro-studio/api/live/{scope_id:path}")
     @router.get("/v1/neuro/live/{scope_id:path}")
     async def neuro_live_snapshot(scope_id: str) -> dict[str, Any]:
         clean_scope = (scope_id or "default").strip()[:64] or "default"
-        return await _build_zero_pii_snapshot(_engine(), clean_scope)
+        return await _build_zero_pii_snapshot(_engine(), clean_scope, read_only=True)
 
     @router.post("/neuro-studio/api/sandbox-pulse")
     @router.post("/v1/neuro/sandbox-pulse")

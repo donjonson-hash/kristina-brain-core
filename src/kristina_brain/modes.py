@@ -184,6 +184,49 @@ class AsyncOrganismModes:
     async def snapshot(self, scope_id: str = "default") -> dict[str, ModeState]:
         return await self.relax_to_baseline(scope_id)
 
+    async def snapshot_readonly(
+        self, scope_id: str = "default", at: datetime | None = None
+    ) -> dict[str, ModeState]:
+        """Read-only снимок мод: decay амплитуд считается в памяти.
+
+        Ничего не пишет и не сеет строки: отсутствующие моды показываются со
+        значением baseline. Используется публичными GET-снимками обсерватории,
+        чтобы чтение не мутировало состояние."""
+        now = (at or self.clock.now_utc()).astimezone(UTC)
+        raw_map = await self.store.load_modes(scope_id)
+        result: dict[str, ModeState] = {}
+        for name, defn in self.definitions.items():
+            row = raw_map.get(name)
+            if row is None:
+                result[name] = ModeState(
+                    name=name,
+                    baseline=defn.baseline,
+                    amplitude=defn.baseline,
+                    phase=0.0,
+                    half_life_hours=defn.half_life_hours,
+                    updated_at=now,
+                )
+                continue
+            prev_dt = datetime.fromisoformat(str(row["updated_at"]))
+            if prev_dt.tzinfo is None:
+                prev_dt = prev_dt.replace(tzinfo=UTC)
+            dt_hours = max(0.0, (now - prev_dt.astimezone(UTC)).total_seconds() / 3600.0)
+            new_amp = _decay_towards_baseline(
+                float(row["amplitude"]),
+                float(row["baseline"]),
+                dt_hours,
+                float(row["half_life_hours"]),
+            )
+            result[name] = ModeState(
+                name=name,
+                baseline=float(row["baseline"]),
+                amplitude=new_amp,
+                phase=float(row["phase"]),
+                half_life_hours=float(row["half_life_hours"]),
+                updated_at=now,
+            )
+        return result
+
     async def dominant(self, scope_id: str = "default", limit: int = 3) -> list[ModeState]:
         snap = await self.snapshot(scope_id)
         ranked = sorted(snap.values(), key=lambda m: abs(m.deviation), reverse=True)
