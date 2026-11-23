@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -271,6 +272,24 @@ class SynapticGraphEngine:
     ) -> None:
         self.store = store
         self.clock: ClockProvider = clock or SystemClock("UTC")
+        self._scope_locks: dict[str, asyncio.Lock] = {}
+
+    def _lock_for(self, scope_id: str) -> asyncio.Lock:
+        """Per-scope asyncio.Lock: сериализует load->compute->persist RMW одного scope_id.
+
+        Устраняет lost-update гонку: конкурентные propagate_stimuli / reset_circuit /
+        consolidate для одного scope_id не теряют pulse_seq, last_packets и обновления
+        весов (замер: 20 конкурентных импульсов давали pulse_seq=1 вместо 20).
+
+        ВАЖНО: вызывать ТОЛЬКО на внешних entry-точках. ensure_circuit и _persist
+        остаются без лока, т.к. они вызываются под локом владельца — asyncio.Lock
+        не реентерабелен, вложенное взятие дало бы deadlock.
+        """
+        lock = self._scope_locks.get(scope_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._scope_locks[scope_id] = lock
+        return lock
 
     def _build_default_circuit(
         self,
@@ -329,10 +348,11 @@ class SynapticGraphEngine:
 
     async def reset_circuit(self, scope_id: str) -> dict[str, Any]:
         """Сбрасывает граф нейронов и синапсов для указанного scope_id к начальному шаблону."""
-        now = self.clock.now_utc().astimezone(UTC)
-        neurons, synapses = self._build_default_circuit(now)
-        await self._persist(scope_id, neurons, synapses, now, pulse_seq=0, last_packets=[])
-        return await self.inspect_graph(scope_id)
+        async with self._lock_for(scope_id):
+            now = self.clock.now_utc().astimezone(UTC)
+            neurons, synapses = self._build_default_circuit(now)
+            await self._persist(scope_id, neurons, synapses, now, pulse_seq=0, last_packets=[])
+            return await self.inspect_graph(scope_id)
 
     @staticmethod
     def _deserialize(
@@ -462,6 +482,18 @@ class SynapticGraphEngine:
         return edge
 
     async def propagate_stimuli(
+        self,
+        stimuli: Mapping[str, float],
+        chem: NeuromodulatorField,
+        *,
+        scope_id: str = "default",
+        at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Публичная точка входа: сериализует импульсы по scope_id (см. _lock_for)."""
+        async with self._lock_for(scope_id):
+            return await self._propagate_stimuli_unlocked(stimuli, chem, scope_id=scope_id, at=at)
+
+    async def _propagate_stimuli_unlocked(
         self,
         stimuli: Mapping[str, float],
         chem: NeuromodulatorField,
