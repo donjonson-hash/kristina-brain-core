@@ -67,6 +67,20 @@ class SleepConsolidationWorker:
         chem: NeuromodulatorField | None = None,
         at: datetime | None = None,
     ) -> SleepConsolidationReport:
+        """Публичная точка входа: сериализует сонную консолидацию по scope_id с импульсами."""
+        async with self.synaptic_engine._lock_for(scope_id):
+            return await self._consolidate_unlocked(
+                scope_id, reward_signal=reward_signal, chem=chem, at=at
+            )
+
+    async def _consolidate_unlocked(
+        self,
+        scope_id: str = "default",
+        *,
+        reward_signal: float = 0.0,
+        chem: NeuromodulatorField | None = None,
+        at: datetime | None = None,
+    ) -> SleepConsolidationReport:
         now = (at or self.clock.now_utc()).astimezone(UTC)
         bounded_reward = max(-1.0, min(1.0, float(reward_signal)))
         da_gain = 0.5 + 0.5 * (chem.dopamine if chem is not None else 0.5)

@@ -220,3 +220,25 @@ def test_online_observatory_zero_pii_and_sandbox_isolation(
         )
         assert r_auth.status_code == 200
         assert r_auth.json()["snapshot"]["pulse_seq"] == 3
+
+
+@pytest.mark.asyncio
+async def test_concurrent_pulses_preserve_pulse_seq(tmp_path: Path) -> None:
+    """Регрессия lost-update гонки RMW: N конкурентных импульсов на один scope дают ровно N.
+
+    Без per-scope lock (`_lock_for`) 20 конкурентных pulse_synapses читали одно начальное
+    значение pulse_seq и писали 1 (замер: LOST=19). Лок сериализует load->compute->persist.
+    """
+    clock = FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC))
+    store = AsyncSQLiteStateStore(str(tmp_path / "brain.db"))
+    engine = BrainEngine(store, clock=clock)
+    await engine.start()
+    try:
+        n = 20
+        await asyncio.gather(
+            *(engine.pulse_synapses("kristina", {"sensor_curiosity": 0.9}) for _ in range(n))
+        )
+        graph = await engine.synapses.inspect_graph("kristina")
+        assert graph["pulse_seq"] == n, f"lost updates: expected {n}, got {graph['pulse_seq']}"
+    finally:
+        await engine.shutdown()
