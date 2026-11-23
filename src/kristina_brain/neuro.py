@@ -278,8 +278,9 @@ class SynapticGraphEngine:
         """Per-scope asyncio.Lock: сериализует load->compute->persist RMW одного scope_id.
 
         Устраняет lost-update гонку: конкурентные propagate_stimuli / reset_circuit /
-        consolidate для одного scope_id не теряют pulse_seq, last_packets и обновления
-        весов (замер: 20 конкурентных импульсов давали pulse_seq=1 вместо 20).
+        register_custom_synapse / consolidate для одного scope_id не теряют pulse_seq,
+        last_packets и обновления весов (замер: 20 конкурентных импульсов давали
+        pulse_seq=1 вместо 20).
 
         ВАЖНО: вызывать ТОЛЬКО на внешних entry-точках. ensure_circuit и _persist
         остаются без лока, т.к. они вызываются под локом владельца — asyncio.Lock
@@ -444,6 +445,25 @@ class SynapticGraphEngine:
         await self.store.save_neural_graph(scope_id, payload)
 
     async def register_custom_synapse(
+        self,
+        scope_id: str,
+        *,
+        source_id: str,
+        target_id: str,
+        weight: float,
+        plasticity: float = 0.12,
+    ) -> SynapseEdge:
+        """Публичная точка входа: сериализует RMW регистрации по scope_id (см. _lock_for)."""
+        async with self._lock_for(scope_id):
+            return await self._register_custom_synapse_unlocked(
+                scope_id,
+                source_id=source_id,
+                target_id=target_id,
+                weight=weight,
+                plasticity=plasticity,
+            )
+
+    async def _register_custom_synapse_unlocked(
         self,
         scope_id: str,
         *,
