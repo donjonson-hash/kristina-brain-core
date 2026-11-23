@@ -261,7 +261,18 @@ def create_control_plane_app(
         authorization: str | None = Header(default=None),
     ) -> None:
         if not expected_key:
-            return
+            # Fail-closed: без настроенного ключа API закрыт. Для локальной
+            # разработки есть явный opt-out BRAIN_CONTROL_NO_AUTH=1.
+            if os.getenv("BRAIN_CONTROL_NO_AUTH", "").strip().lower() in ("1", "true", "yes", "on"):
+                return
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "BRAIN_CONTROL_API_KEY is not configured; the Control Plane API "
+                    "refuses unauthenticated access. Set BRAIN_CONTROL_API_KEY or "
+                    "BRAIN_CONTROL_NO_AUTH=1 (local development only)."
+                ),
+            )
         candidate = x_api_key or ""
         if not candidate and authorization and authorization.lower().startswith("bearer "):
             candidate = authorization[7:].strip()

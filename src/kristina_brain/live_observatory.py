@@ -28,7 +28,9 @@ SANDBOX_SCOPE = "demo:sandbox"
 class SandboxPulseRequest(BaseModel):
     scope_id: str = Field(default=SANDBOX_SCOPE, max_length=64)
     action: Literal["pulse", "sleep", "reset"] = "pulse"
-    stimuli: dict[str, float] = Field(default_factory=dict)
+    # Any (не float): нечисловые значения мягко отфильтровываются в обработчике,
+    # а не валят весь запрос 422 (один мусорный ключ не должен блокировать импульс).
+    stimuli: dict[str, Any] = Field(default_factory=dict)
     reward_signal: float = 0.75
 
 
@@ -119,7 +121,10 @@ def create_observatory_router(
     @router.get("/neuro-studio/api/live/{scope_id:path}")
     @router.get("/v1/neuro/live/{scope_id:path}")
     async def neuro_live_snapshot(scope_id: str) -> dict[str, Any]:
-        clean_scope = (scope_id or "default").strip()[:64] or "default"
+        clean_scope = (scope_id or "default").strip() or "default"
+        if len(clean_scope) > 64:
+            # Явный 422 вместо молчаливой обрезки: обрезка коллизила разные scope.
+            raise HTTPException(status_code=422, detail="scope_id must be at most 64 characters")
         return await _build_zero_pii_snapshot(_engine(), clean_scope, read_only=True)
 
     @router.post("/neuro-studio/api/sandbox-pulse")
