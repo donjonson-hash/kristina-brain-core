@@ -372,7 +372,7 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
       const nowMs = performance.now();
       pkts.forEach((pkt) => {
         const hop = Number(pkt.hop || 1);
-        const delay = (hop - 1) * 340;
+        const delay = Math.max(0, hop - 1) * 340;
         const isInhib = Number(pkt.weight) < 0 || pkt.outcome === 'INHIBITED';
         particles.push({
           source: pkt.source_id,
@@ -451,9 +451,9 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
           return;
         }
         alive.push(pt);
-        const p1 = nodePositions[pt.source];
         const p2 = nodePositions[pt.target];
-        if (!p1 || !p2) return;
+        if (!p2) return;
+        const p1 = nodePositions[pt.source] || { x: p2.x - 76, y: p2.y };
         const sx = p1.x + 26;
         const ex = p2.x - 28;
         const cpx = (sx + ex) * 0.5;
@@ -718,11 +718,12 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
         return `Пробой за ${d.engine_latency_ms} мс (${d.pulse.packet_trace.length} пакетов)`;
       });
 
-      await check('7. Рефрактерный блок повторного спама', 'Повторный импульс в окно 1800с получает REFRACTORY_BLOCKED', async () => {
+      await check('7. Рефрактерный блок повторного спама', 'Повторный импульс мгновенно гасится рефрактерным щитом (0 открытых шлюзов)', async () => {
         const d = await runCloudSandboxAction('pulse', { sensor_curiosity: 0.95 }, 0, null);
-        const blocked = (d.pulse.packet_trace || []).some((p) => p.outcome === 'REFRACTORY_BLOCKED');
-        if (!blocked) throw new Error('Рефрактерное окно не сработало');
-        return 'Шлюз защищён от дублирования (REFRACTORY_BLOCKED)';
+        const gatesOpen = (d.pulse.opened_motor_gates || []).length;
+        const blockedPkt = (d.pulse.packet_trace || []).find((p) => p.outcome === 'REFRACTORY_BLOCKED');
+        if (gatesOpen > 0 || !blockedPkt) throw new Error('Рефрактерное окно не сработало');
+        return `Дубль остановлен на ${blockedPkt.target_id} (H${blockedPkt.hop} · REFRACTORY_BLOCKED)`;
       });
 
       await check('8. Тормозной синапс ГАМК (-0.95) при конфликте', 'sensor_conflict мгновенно гасит gate_proactive_outreach', async () => {

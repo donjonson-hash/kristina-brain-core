@@ -507,6 +507,24 @@ class SynapticGraphEngine:
                 if potentials[nid] >= eff_th:
                     if in_refractory:
                         refractory_blocked_ids.add(nid)
+                        if layer_kind == "sensory" and nid in stimuli:
+                            raw_packets.append(
+                                {
+                                    "seq": pulse_seq,
+                                    "ts": now.isoformat(),
+                                    "hop": 0,
+                                    "edge": f"stimulus->{nid}",
+                                    "source_id": "external_stimulus",
+                                    "target_id": nid,
+                                    "pre_spike": round(float(stimuli[nid]), 4),
+                                    "weight": 1.0,
+                                    "current": round(float(stimuli[nid]), 4),
+                                    "v_before": round(potentials[nid], 4),
+                                    "v_after": round(potentials[nid], 4),
+                                    "eff_threshold": round(eff_th, 4),
+                                    "eligibility": 0.0,
+                                }
+                            )
                     else:
                         amp = potentials[nid]
                         spike = SpikeEvent(
@@ -618,6 +636,7 @@ class SynapticGraphEngine:
             "opened_motor_gates": opened_gates,
             "open_gates": opened_gates,
             "fired_gates": opened_gates,
+            "refractory_blocked": sorted(refractory_blocked_ids),
             "packet_trace": packet_trace,
             "requires_llm_cortex": len(opened_gates) > 0,
         }

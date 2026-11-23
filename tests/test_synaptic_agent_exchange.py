@@ -98,7 +98,12 @@ async def test_refractory_window_records_refractory_blocked_outcome(tmp_path: Pa
         p1 = await engine.pulse_synapses("kristina", {"sensor_curiosity": 0.96})
         assert "gate_creative_imagination" in p1["opened_motor_gates"]
 
-        clock.advance(seconds=90)
+        clock.advance(seconds=1)
+        p_fast = await engine.pulse_synapses("kristina", {"sensor_curiosity": 0.96})
+        assert p_fast["opened_motor_gates"] == []
+        assert p_fast["packet_trace"][0]["outcome"] == "REFRACTORY_BLOCKED"
+
+        clock.advance(seconds=89)
         p2 = await engine.pulse_synapses("kristina", {"sensor_curiosity": 0.96})
         assert "gate_creative_imagination" not in p2["opened_motor_gates"]
         outcomes = {
