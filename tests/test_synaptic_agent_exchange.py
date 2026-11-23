@@ -275,3 +275,71 @@ async def test_concurrent_register_custom_synapse_keeps_all_edges(tmp_path: Path
         assert not missing, f"lost synapses under concurrency: {missing}"
     finally:
         await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_multi_engine_pulses_preserve_pulse_seq(tmp_path: Path) -> None:
+    """Регрессия межинстансной RMW-гонки: продакшен-форма live_synaptic_bridge.
+
+    Мост создаёт НОВЫЙ BrainEngine на каждый Telegram-ход, а ходы конкурентны:
+    per-scope _lock_for сериализует только внутри одного инстанса. Без CAS-коммита
+    20 конкурентных импульсов через 20 разных engine на одну БД теряли ~8-9
+    инкрементов pulse_seq (замер). С CAS-retry — ровно 20.
+    """
+    db = str(tmp_path / "shared.db")
+    n = 20
+
+    async def one_turn() -> None:
+        store = AsyncSQLiteStateStore(db)
+        engine = BrainEngine(store, clock=FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC)))
+        await engine.start()
+        try:
+            await engine.pulse_synapses("default", {"sensor_curiosity": 0.9})
+        finally:
+            await engine.shutdown()
+
+    await asyncio.gather(*(one_turn() for _ in range(n)))
+
+    store = AsyncSQLiteStateStore(db)
+    engine = BrainEngine(store, clock=FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC)))
+    await engine.start()
+    try:
+        graph = await engine.synapses.inspect_graph("default")
+        assert graph["pulse_seq"] == n, f"lost updates across engines: expected {n}, got {graph['pulse_seq']}"
+    finally:
+        await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_multi_engine_register_keeps_all_edges(tmp_path: Path) -> None:
+    """Регрессия межинстансной гонки register_custom_synapse: ни один синапс не теряется.
+
+    20 конкурентных регистраций через 20 разных engine на одну БД: без CAS-коммита
+    выживал синапс последнего писателя.
+    """
+    db = str(tmp_path / "shared.db")
+    n = 20
+
+    async def one_register(i: int) -> None:
+        store = AsyncSQLiteStateStore(db)
+        engine = BrainEngine(store, clock=FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC)))
+        await engine.start()
+        try:
+            await engine.synapses.register_custom_synapse(
+                "default", source_id=f"sensor_x_{i}", target_id="inter_bridge", weight=0.5
+            )
+        finally:
+            await engine.shutdown()
+
+    await asyncio.gather(*(one_register(i) for i in range(n)))
+
+    store = AsyncSQLiteStateStore(db)
+    engine = BrainEngine(store, clock=FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC)))
+    await engine.start()
+    try:
+        graph = await engine.synapses.inspect_graph("default")
+        edges = {entry["edge"] for entry in graph["synapses"]}
+        missing = [f"sensor_x_{i}->inter_bridge" for i in range(n) if f"sensor_x_{i}->inter_bridge" not in edges]
+        assert not missing, f"lost synapses across engines: {missing}"
+    finally:
+        await engine.shutdown()
