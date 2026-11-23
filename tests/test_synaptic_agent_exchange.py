@@ -242,3 +242,36 @@ async def test_concurrent_pulses_preserve_pulse_seq(tmp_path: Path) -> None:
         assert graph["pulse_seq"] == n, f"lost updates: expected {n}, got {graph['pulse_seq']}"
     finally:
         await engine.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_register_custom_synapse_keeps_all_edges(tmp_path: Path) -> None:
+    """Регрессия lost-update гонки RMW в register_custom_synapse: ни один синапс не теряется.
+
+    Без per-scope lock конкурентные регистрации читали граф (ensure_circuit), добавляли
+    свой синапс и целиком перезаписывали его (_persist) — выживал синапс последнего
+    писателя. Лок сериализует load->compute->persist: все N ребер остаются в графе.
+    """
+    clock = FixedClock(datetime(2026, 11, 23, 12, 0, tzinfo=UTC))
+    store = AsyncSQLiteStateStore(str(tmp_path / "brain.db"))
+    engine = BrainEngine(store, clock=clock)
+    await engine.start()
+    try:
+        n = 20
+        await asyncio.gather(
+            *(
+                engine.synapses.register_custom_synapse(
+                    "kristina",
+                    source_id=f"sensor_custom_{i}",
+                    target_id="inter_bridge",
+                    weight=0.5,
+                )
+                for i in range(n)
+            )
+        )
+        graph = await engine.synapses.inspect_graph("kristina")
+        edges = {entry["edge"] for entry in graph["synapses"]}
+        missing = [f"sensor_custom_{i}->inter_bridge" for i in range(n) if f"sensor_custom_{i}->inter_bridge" not in edges]
+        assert not missing, f"lost synapses under concurrency: {missing}"
+    finally:
+        await engine.shutdown()
