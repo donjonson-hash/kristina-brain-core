@@ -26,6 +26,7 @@ import httpx
 from .appraisal import Appraisal
 from .clock import ClockProvider
 from .engine import BrainEngine
+from .live_observatory import mount_neuro_observatory
 from .llm_provider import FailoverLLMProvider, LLMProvider, OllamaChatProvider
 from .postgres_store import create_state_store
 from .profile import DEFAULT_KRISTINA_PROFILE, BigFiveTraits, PersonaProfile
@@ -439,6 +440,7 @@ def create_control_plane_app(
         reward = float(body.get("reward_signal", 0.0))
         return await eng.run_sleep_consolidation(scope_id, reward_signal=reward)
 
+    mount_neuro_observatory(app, state_holder, expected_api_key=api_key)
     return app
 
 

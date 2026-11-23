@@ -6,12 +6,13 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from kristina_brain import (
+    DEFAULT_KRISTINA_PROFILE,
     AsyncSQLiteStateStore,
     BrainEngine,
-    DEFAULT_KRISTINA_PROFILE,
     HTTPXChatCompletionsProvider,
 )
 
@@ -24,7 +25,7 @@ class TelegramBrainRuntimeAdapter:
     на единый неблокирующий BrainEngine с сохранением состояния между рестартами systemd.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         resolved_db = db_path or os.getenv("KRISTINA_STATE_DB", "kristina_state.db")
         store = AsyncSQLiteStateStore(resolved_db)
         llm = HTTPXChatCompletionsProvider(
@@ -47,8 +48,8 @@ class TelegramBrainRuntimeAdapter:
         chat_id: int,
         message_id: int,
         text: str,
-        history: Sequence[Dict[str, Any]] = (),
-    ) -> Dict[str, Any]:
+        history: Sequence[dict[str, Any]] = (),
+    ) -> dict[str, Any]:
         """Вызывается в обработчике входящего сообщения Telegram."""
         return await self.engine.ingest_message(
             scope_id=f"tg:{chat_id}",
@@ -57,7 +58,7 @@ class TelegramBrainRuntimeAdapter:
             history=history,
         )
 
-    async def on_minute_heartbeat(self, chat_id: int) -> Optional[Dict[str, Any]]:
+    async def on_minute_heartbeat(self, chat_id: int) -> dict[str, Any] | None:
         """
         Вызывается в минутном job_queue Telegram-бота.
         Возвращает решение с intention и контекстом для генерации проактивной реплики,

@@ -1076,6 +1076,14 @@ class AsyncSQLiteStateStore:
         return await self._run(_op)
 
     async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+        if "pulse_seq" not in graph:
+            _prev_g = await self.load_neural_graph(scope_id)
+            if _prev_g is not None:
+                graph = {
+                    **graph,
+                    "pulse_seq": int(_prev_g.get("pulse_seq", 0)),
+                    "last_packets": list(_prev_g.get("last_packets") or []),
+                }
         serialized = json.dumps(dict(graph), ensure_ascii=False)
         now_iso = str(graph.get("updated_at") or datetime.now(UTC).isoformat())
 
