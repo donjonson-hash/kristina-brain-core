@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import math
-from collections.abc import Mapping
+import time
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from .clock import ClockProvider, SystemClock
 from .modes import ModeState
@@ -24,6 +25,11 @@ if TYPE_CHECKING:
     from .state_store import StateStore
 
 NeuronKind = Literal["sensory", "inter", "motor_gate"]
+
+T = TypeVar("T")
+
+# Лимит повторов CAS-коммитов RMW-точек графа (см. _commit_with_retry).
+_COMMIT_RETRY_SECONDS = 5.0
 
 
 def _clamp(val: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -330,6 +336,47 @@ class SynapticGraphEngine:
             )
         return neurons, synapses
 
+    async def _load_circuit(
+        self,
+        scope_id: str = "default",
+        *,
+        initial_synapse_overrides: Mapping[str, float] | None = None,
+        at: datetime | None = None,
+    ) -> tuple[dict[str, NeuronNode], dict[str, SynapseEdge], dict[str, Any]]:
+        """Один read графа: (neurons, synapses, raw). Для отсутствующего контура raw={}.
+
+        Не пишет в стор: отсутствующий контур строится в памяти, его запись
+        выполняет CAS-коммит вызывающей RMW-точки (см. _commit_with_retry).
+        """
+        now = (at or self.clock.now_utc()).astimezone(UTC)
+        raw = await self.store.load_neural_graph(scope_id)
+        if raw is None:
+            neurons, synapses = self._build_default_circuit(now, initial_synapse_overrides)
+            return neurons, synapses, {}
+        neurons, synapses = self._deserialize(raw, now)
+        return neurons, synapses, dict(raw)
+
+    async def _commit_with_retry(
+        self,
+        scope_id: str,
+        attempt: Callable[[], Awaitable[T | None]],
+    ) -> T:
+        """Retry-цикл load -> compute -> CAS-save для RMW-точек графа.
+
+        attempt() возвращает None, если CAS-коммит проиграл конкурентной записи
+        (другой инстанс/процесс изменил граф между load и save), и тогда попытка
+        повторяется целиком. Это закрывает межинстансную и межпроцессную гонку,
+        которую не покрывает per-scope _lock_for (он сериализует только внутри
+        одного инстанса)."""
+        deadline = time.monotonic() + _COMMIT_RETRY_SECONDS
+        while True:
+            result = await attempt()
+            if result is not None:
+                return result
+            if time.monotonic() >= deadline:
+                raise RuntimeError(f"neural graph commit contention: scope_id={scope_id}")
+            await asyncio.sleep(0.002)
+
     async def ensure_circuit(
         self,
         scope_id: str = "default",
@@ -338,14 +385,23 @@ class SynapticGraphEngine:
         at: datetime | None = None,
     ) -> tuple[dict[str, NeuronNode], dict[str, SynapseEdge]]:
         now = (at or self.clock.now_utc()).astimezone(UTC)
-        raw = await self.store.load_neural_graph(scope_id)
-
-        if raw is None:
-            neurons, synapses = self._build_default_circuit(now, initial_synapse_overrides)
-            await self._persist(scope_id, neurons, synapses, now, pulse_seq=0, last_packets=[])
+        neurons, synapses, raw = await self._load_circuit(
+            scope_id, initial_synapse_overrides=initial_synapse_overrides, at=now
+        )
+        if raw:
             return neurons, synapses
 
-        return self._deserialize(raw, now)
+        # Создание контура атомарным CAS (expected_rev=0): при конкурентном
+        # создании проигравший берёт уже сохранённый контур.
+        created = await self._persist(
+            scope_id, neurons, synapses, now, pulse_seq=0, last_packets=[], expected_rev=0
+        )
+        if created:
+            return neurons, synapses
+        raw2 = await self.store.load_neural_graph(scope_id)
+        if raw2 is None:
+            return neurons, synapses
+        return self._deserialize(raw2, now)
 
     async def reset_circuit(self, scope_id: str) -> dict[str, Any]:
         """Сбрасывает граф нейронов и синапсов для указанного scope_id к начальному шаблону."""
@@ -401,15 +457,16 @@ class SynapticGraphEngine:
         *,
         pulse_seq: int | None = None,
         last_packets: list[dict[str, Any]] | None = None,
-    ) -> None:
-        if pulse_seq is None or last_packets is None:
-            existing = await self.store.load_neural_graph(scope_id) or {}
-            if pulse_seq is None:
-                pulse_seq = int(existing.get("pulse_seq", 0))
-            if last_packets is None:
-                last_packets = list(existing.get("last_packets") or [])
+        expected_rev: int | None = None,
+    ) -> bool:
+        """Сериализует граф и атомарно пишет его в стор.
 
-        payload = {
+        pulse_seq / last_packets, не переданные явно, стор берёт из предыдущей
+        версии ВНУТРИ той же транзакции (без окна read-modify-write).
+        expected_rev: CAS-проверка ревизии (см. commit_neural_graph);
+        None — безусловная запись. Возвращает True, если запись прошла.
+        """
+        payload: dict[str, Any] = {
             "neurons": {
                 nid: {
                     "kind": n.kind,
@@ -438,11 +495,16 @@ class SynapticGraphEngine:
                 }
                 for key, s in synapses.items()
             },
-            "pulse_seq": int(pulse_seq),
-            "last_packets": list(last_packets)[-40:],
             "updated_at": now.isoformat(),
         }
+        if pulse_seq is not None:
+            payload["pulse_seq"] = int(pulse_seq)
+        if last_packets is not None:
+            payload["last_packets"] = list(last_packets)[-40:]
+        if expected_rev is not None:
+            return await self.store.commit_neural_graph(scope_id, payload, expected_rev=expected_rev)
         await self.store.save_neural_graph(scope_id, payload)
+        return True
 
     async def register_custom_synapse(
         self,
@@ -473,7 +535,31 @@ class SynapticGraphEngine:
         plasticity: float = 0.12,
     ) -> SynapseEdge:
         now = self.clock.now_utc()
-        neurons, synapses = await self.ensure_circuit(scope_id, at=now)
+        return await self._commit_with_retry(
+            scope_id,
+            lambda: self._register_attempt(
+                scope_id,
+                source_id=source_id,
+                target_id=target_id,
+                weight=weight,
+                plasticity=plasticity,
+                now=now,
+            ),
+        )
+
+    async def _register_attempt(
+        self,
+        scope_id: str,
+        *,
+        source_id: str,
+        target_id: str,
+        weight: float,
+        plasticity: float,
+        now: datetime,
+    ) -> SynapseEdge | None:
+        """Одна RMW-попытка регистрации: None, если CAS-коммит проиграл конкурентной записи."""
+        neurons, synapses, raw = await self._load_circuit(scope_id, at=now)
+        rev = int(raw.get("rev", 0))
         if source_id not in neurons:
             neurons[source_id] = NeuronNode(
                 neuron_id=source_id,
@@ -498,8 +584,8 @@ class SynapticGraphEngine:
             updated_at=now,
         )
         synapses[edge.edge_key] = edge
-        await self._persist(scope_id, neurons, synapses, now)
-        return edge
+        committed = await self._persist(scope_id, neurons, synapses, now, expected_rev=rev)
+        return edge if committed else None
 
     async def propagate_stimuli(
         self,
@@ -523,8 +609,21 @@ class SynapticGraphEngine:
     ) -> dict[str, Any]:
         """Прогоняет сенсорные токи через 3 слоя (sensory -> inter -> motor_gate) и пишет packet_trace."""
         now = (at or self.clock.now_utc()).astimezone(UTC)
-        neurons, synapses = await self.ensure_circuit(scope_id, at=now)
-        raw_prev = await self.store.load_neural_graph(scope_id) or {}
+        return await self._commit_with_retry(
+            scope_id, lambda: self._propagate_attempt(stimuli, chem, scope_id=scope_id, now=now)
+        )
+
+    async def _propagate_attempt(
+        self,
+        stimuli: Mapping[str, float],
+        chem: NeuromodulatorField,
+        *,
+        scope_id: str,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """Одна RMW-попытка импульса: None, если CAS-коммит проиграл конкурентной записи."""
+        neurons, synapses, raw_prev = await self._load_circuit(scope_id, at=now)
+        rev = int(raw_prev.get("rev", 0))
         pulse_seq = int(raw_prev.get("pulse_seq", 0)) + 1
         prev_packets = list(raw_prev.get("last_packets") or [])
 
@@ -662,14 +761,17 @@ class SynapticGraphEngine:
             for key, s in synapses.items()
         }
         merged_packets = (prev_packets + packet_trace)[-40:]
-        await self._persist(
+        committed = await self._persist(
             scope_id,
             updated_neurons,
             updated_synapses,
             now,
             pulse_seq=pulse_seq,
             last_packets=merged_packets,
+            expected_rev=rev,
         )
+        if not committed:
+            return None
 
         opened_gates = [sp.neuron_id for sp in fired_spikes if sp.kind == "motor_gate"]
         return {

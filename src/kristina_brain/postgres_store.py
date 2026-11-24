@@ -802,10 +802,27 @@ class AsyncPostgresStateStore:
             res: dict[str, Any] = _loads_if_str(row["graph_json"], {})
             return res
 
-    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+    async def commit_neural_graph(
+        self, scope_id: str, graph: Mapping[str, Any], *, expected_rev: int
+    ) -> bool:
+        """Атомарный CAS-коммит графа (см. AsyncSQLiteStateStore.commit_neural_graph)."""
         pool = await self._ensure_pool()
-        serialized = json.dumps(dict(graph), ensure_ascii=False)
         async with pool.acquire() as conn, conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT graph_json FROM brain_neural_graphs WHERE scope_id = $1",
+                scope_id,
+            )
+            prev: dict[str, Any] = _loads_if_str(row["graph_json"], {}) if row else {}
+            cur_rev = int(prev.get("rev", 0))
+            if expected_rev >= 0 and cur_rev != expected_rev:
+                return False
+            payload = dict(graph)
+            if "pulse_seq" not in payload:
+                payload["pulse_seq"] = int(prev.get("pulse_seq", 0))
+            if "last_packets" not in payload:
+                payload["last_packets"] = list(prev.get("last_packets") or [])
+            payload["rev"] = cur_rev + 1
+            serialized = json.dumps(payload, ensure_ascii=False)
             await conn.execute(
                 """
                 INSERT INTO brain_neural_graphs(scope_id, graph_json, updated_at)
@@ -816,8 +833,12 @@ class AsyncPostgresStateStore:
                 """,
                 scope_id,
                 serialized,
-                _dt_utc(graph.get("updated_at")) or datetime.now(UTC),
+                _dt_utc(payload.get("updated_at")) or datetime.now(UTC),
             )
+            return True
+
+    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+        await self.commit_neural_graph(scope_id, graph, expected_rev=-1)
 
 
 def create_state_store(dsn_or_path: str | Path = "kristina_state.db") -> StateStore:
