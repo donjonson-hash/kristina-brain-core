@@ -16,7 +16,7 @@ import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 from .clock import ClockProvider, SystemClock
 from .modes import ModeState
@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from .state_store import StateStore
 
 NeuronKind = Literal["sensory", "inter", "motor_gate"]
+
+T = TypeVar("T")
 
 # Лимит повторов CAS-коммитов RMW-точек графа (см. _commit_with_retry).
 _COMMIT_RETRY_SECONDS = 5.0
@@ -357,8 +359,8 @@ class SynapticGraphEngine:
     async def _commit_with_retry(
         self,
         scope_id: str,
-        attempt: Callable[[], Awaitable[Any]],
-    ) -> Any:
+        attempt: Callable[[], Awaitable[T | None]],
+    ) -> T:
         """Retry-цикл load -> compute -> CAS-save для RMW-точек графа.
 
         attempt() возвращает None, если CAS-коммит проиграл конкурентной записи
