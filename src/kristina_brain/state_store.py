@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -163,10 +164,22 @@ class AsyncSQLiteStateStore:
             if self._conn is None:
                 conn = sqlite3.connect(self.db_path, timeout=10.0, isolation_level=None)
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL;")
+                # busy_timeout ДО любых обращений к БД: он покрывает ожидание
+                # записи для конкурентных подключений.
+                conn.execute("PRAGMA busy_timeout=5000;")
+                # journal_mode=WAL на свежей БД не ретраится busy-handler'ом:
+                # конкурентные новые коннекты получают "database is locked".
+                # Ретраим вручную (замер: 20 одновременных engine падали без этого).
+                for _attempt in range(50):
+                    try:
+                        conn.execute("PRAGMA journal_mode=WAL;")
+                        break
+                    except sqlite3.OperationalError:
+                        if _attempt == 49:
+                            raise
+                        time.sleep(0.02)
                 conn.execute("PRAGMA synchronous=NORMAL;")
                 conn.execute("PRAGMA foreign_keys=ON;")
-                conn.execute("PRAGMA busy_timeout=5000;")
                 self._conn = conn
             return fn(self._conn)
 
