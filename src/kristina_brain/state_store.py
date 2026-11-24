@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -114,6 +115,9 @@ class StateStore(Protocol):
     # --- Субсимвольный нейронно-синаптический граф (v1.1.0) ---
     async def load_neural_graph(self, scope_id: str) -> dict[str, Any] | None: ...
     async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None: ...
+    async def commit_neural_graph(
+        self, scope_id: str, graph: Mapping[str, Any], *, expected_rev: int
+    ) -> bool: ...
 
     # --- Приватная Shadow-телеметрия решений без PII ---
     async def insert_shadow_telemetry_once(self, row: Mapping[str, Any]) -> bool: ...
@@ -160,10 +164,22 @@ class AsyncSQLiteStateStore:
             if self._conn is None:
                 conn = sqlite3.connect(self.db_path, timeout=10.0, isolation_level=None)
                 conn.row_factory = sqlite3.Row
-                conn.execute("PRAGMA journal_mode=WAL;")
+                # busy_timeout ДО любых обращений к БД: он покрывает ожидание
+                # записи для конкурентных подключений.
+                conn.execute("PRAGMA busy_timeout=5000;")
+                # journal_mode=WAL на свежей БД не ретраится busy-handler'ом:
+                # конкурентные новые коннекты получают "database is locked".
+                # Ретраим вручную (замер: 20 одновременных engine падали без этого).
+                for _attempt in range(50):
+                    try:
+                        conn.execute("PRAGMA journal_mode=WAL;")
+                        break
+                    except sqlite3.OperationalError:
+                        if _attempt == 49:
+                            raise
+                        time.sleep(0.02)
                 conn.execute("PRAGMA synchronous=NORMAL;")
                 conn.execute("PRAGMA foreign_keys=ON;")
-                conn.execute("PRAGMA busy_timeout=5000;")
                 self._conn = conn
             return fn(self._conn)
 
@@ -1075,21 +1091,38 @@ class AsyncSQLiteStateStore:
 
         return await self._run(_op)
 
-    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
-        if "pulse_seq" not in graph:
-            _prev_g = await self.load_neural_graph(scope_id)
-            if _prev_g is not None:
-                graph = {
-                    **graph,
-                    "pulse_seq": int(_prev_g.get("pulse_seq", 0)),
-                    "last_packets": list(_prev_g.get("last_packets") or []),
-                }
-        serialized = json.dumps(dict(graph), ensure_ascii=False)
-        now_iso = str(graph.get("updated_at") or datetime.now(UTC).isoformat())
+    async def commit_neural_graph(
+        self, scope_id: str, graph: Mapping[str, Any], *, expected_rev: int
+    ) -> bool:
+        """Атомарный CAS-коммит графа: пишет, только если текущий rev == expected_rev.
 
-        def _op(conn: sqlite3.Connection) -> None:
+        Rev хранится внутри graph_json и инкремируется при каждой записи. Поля
+        pulse_seq / last_packets, отсутствующие в graph, берутся из предыдущей
+        версии ВНУТРИ той же транзакции — окна read-modify-write больше нет,
+        включая межпроцессный доступ (BEGIN IMMEDIATE сериализует писателей).
+        expected_rev < 0 — безусловная запись (rev просто инкрементируется).
+        Возвращает True, если запись прошла.
+        """
+
+        def _op(conn: sqlite3.Connection) -> bool:
             conn.execute("BEGIN IMMEDIATE;")
             try:
+                row = conn.execute(
+                    "SELECT graph_json FROM brain_neural_graphs WHERE scope_id = ?",
+                    (scope_id,),
+                ).fetchone()
+                prev = json.loads(row["graph_json"]) if row else {}
+                cur_rev = int(prev.get("rev", 0))
+                if expected_rev >= 0 and cur_rev != expected_rev:
+                    conn.execute("ROLLBACK;")
+                    return False
+                payload = dict(graph)
+                if "pulse_seq" not in payload:
+                    payload["pulse_seq"] = int(prev.get("pulse_seq", 0))
+                if "last_packets" not in payload:
+                    payload["last_packets"] = list(prev.get("last_packets") or [])
+                payload["rev"] = cur_rev + 1
+                now_iso = str(payload.get("updated_at") or datetime.now(UTC).isoformat())
                 conn.execute(
                     """
                     INSERT INTO brain_neural_graphs(scope_id, graph_json, updated_at)
@@ -1098,12 +1131,18 @@ class AsyncSQLiteStateStore:
                         graph_json = excluded.graph_json,
                         updated_at = excluded.updated_at
                     """,
-                    (scope_id, serialized, now_iso),
+                    (scope_id, json.dumps(payload, ensure_ascii=False), now_iso),
                 )
                 conn.execute("COMMIT;")
+                return True
             except Exception:
                 if conn.in_transaction:
                     conn.execute("ROLLBACK;")
                 raise
 
-        await self._run(_op)
+        return await self._run(_op)
+
+    async def save_neural_graph(self, scope_id: str, graph: Mapping[str, Any]) -> None:
+        # Безусловная запись (rev инкрементируется атомарно; pulse_seq/last_packets
+        # сохраняются из предыдущей версии, если не переданы явно).
+        await self.commit_neural_graph(scope_id, graph, expected_rev=-1)

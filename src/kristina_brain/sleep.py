@@ -86,38 +86,47 @@ class SleepConsolidationWorker:
         da_gain = 0.5 + 0.5 * (chem.dopamine if chem is not None else 0.5)
 
         # 1. Трёхфакторная пластичность синапсов (врождённые рефлексы с plasticity=0 неприкосновенны!)
-        neurons, synapses = await self.synaptic_engine.ensure_circuit(scope_id, at=now)
-        synapse_deltas: dict[str, float] = {}
-        new_synapses: dict[str, SynapseEdge] = {}
+        #    RMW-участок load -> compute -> CAS-save выполняется с повтором при
+        #    конкурентной записи из другого инстанса/процесса (см. _commit_with_retry).
+        async def _attempt() -> tuple[dict[str, SynapseEdge], dict[str, float]] | None:
+            neurons, synapses, raw = await self.synaptic_engine._load_circuit(scope_id, at=now)
+            rev = int(raw.get("rev", 0))
+            synapse_deltas: dict[str, float] = {}
+            new_synapses: dict[str, SynapseEdge] = {}
 
-        for key, syn in synapses.items():
-            if syn.plasticity > 0.0 and syn.eligibility_trace >= 0.01 and abs(bounded_reward) > 1e-6:
-                raw_dw = syn.plasticity * bounded_reward * syn.eligibility_trace * (1.0 - abs(syn.weight)) * da_gain
-                new_w = _clamp(syn.weight + raw_dw, -1.0, 1.0)
-                actual_dw = round(new_w - syn.weight, 5)
-                if abs(actual_dw) > 1e-6:
-                    synapse_deltas[key] = actual_dw
-                new_synapses[key] = SynapseEdge(
-                    source_id=syn.source_id,
-                    target_id=syn.target_id,
-                    weight=new_w,
-                    plasticity=syn.plasticity,
-                    eligibility_trace=round(syn.eligibility_trace * 0.25, 5),
-                    trace_half_life_hours=syn.trace_half_life_hours,
-                    updated_at=now,
-                )
-            else:
-                new_synapses[key] = SynapseEdge(
-                    source_id=syn.source_id,
-                    target_id=syn.target_id,
-                    weight=syn.weight,
-                    plasticity=syn.plasticity,
-                    eligibility_trace=round(syn.eligibility_trace * 0.5, 5),
-                    trace_half_life_hours=syn.trace_half_life_hours,
-                    updated_at=now,
-                )
+            for key, syn in synapses.items():
+                if syn.plasticity > 0.0 and syn.eligibility_trace >= 0.01 and abs(bounded_reward) > 1e-6:
+                    raw_dw = syn.plasticity * bounded_reward * syn.eligibility_trace * (1.0 - abs(syn.weight)) * da_gain
+                    new_w = _clamp(syn.weight + raw_dw, -1.0, 1.0)
+                    actual_dw = round(new_w - syn.weight, 5)
+                    if abs(actual_dw) > 1e-6:
+                        synapse_deltas[key] = actual_dw
+                    new_synapses[key] = SynapseEdge(
+                        source_id=syn.source_id,
+                        target_id=syn.target_id,
+                        weight=new_w,
+                        plasticity=syn.plasticity,
+                        eligibility_trace=round(syn.eligibility_trace * 0.25, 5),
+                        trace_half_life_hours=syn.trace_half_life_hours,
+                        updated_at=now,
+                    )
+                else:
+                    new_synapses[key] = SynapseEdge(
+                        source_id=syn.source_id,
+                        target_id=syn.target_id,
+                        weight=syn.weight,
+                        plasticity=syn.plasticity,
+                        eligibility_trace=round(syn.eligibility_trace * 0.5, 5),
+                        trace_half_life_hours=syn.trace_half_life_hours,
+                        updated_at=now,
+                    )
 
-        await self.synaptic_engine._persist(scope_id, neurons, new_synapses, now)
+            committed = await self.synaptic_engine._persist(
+                scope_id, neurons, new_synapses, now, expected_rev=rev
+            )
+            return (new_synapses, synapse_deltas) if committed else None
+
+        _, synapse_deltas = await self.synaptic_engine._commit_with_retry(scope_id, _attempt)
 
         # 2. Медленный гомеостатический дрейф baseline 12 мод (характер меняется от прожитого!)
         snap = await self.modes_engine.relax_to_baseline(scope_id, at=now)
