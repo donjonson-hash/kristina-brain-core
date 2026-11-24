@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from .neuro import NeuromodulatorField
@@ -113,7 +113,7 @@ def create_observatory_router(
         return eng
 
     @router.get("/neuro-studio", response_class=HTMLResponse)
-    async def neuro_studio_page():
+    async def neuro_studio_page() -> Response:
         return HTMLResponse(content=NEURO_STUDIO_HTML)
 
     @router.get("/neuro-studio/api/live/{scope_id:path}")

@@ -281,7 +281,7 @@ def create_control_plane_app(
         return {"status": "ok", "version": "1.1.0"}
 
     @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard():
+    async def dashboard() -> Any:
         return HTMLResponse(content=DASHBOARD_HTML)
 
     @app.get("/v1/profile", dependencies=[Depends(verify_api_key)])
