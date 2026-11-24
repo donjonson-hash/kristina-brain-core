@@ -324,6 +324,56 @@ def test_online_observatory_live_get_is_read_only_and_openapi_builds(
         con.close()
 
 
+def test_control_plane_fail_closed_auth_scope_and_stimuli_hardening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-closed авторизация без ключа + явный 422 на длинный scope + мягкий фильтр stimuli.
+
+    Регрессии v1.2.0: (1) без BRAIN_CONTROL_API_KEY весь /v1/* API оставался
+    открытым (fail-open `if not expected_key: return`); (2) GET молча обрезал
+    scope_id до 64 символов — разные scope коллизили в одну строку; (3) одно
+    нечисловое значение в stimuli вало весь запрос 422, хотя обработчик задуман
+    мягко отфильтровывать мусор.
+    """
+    db_file = str(tmp_path / "hardening.db")
+    monkeypatch.setenv("BRAIN_CORE_DB", db_file)
+    monkeypatch.delenv("BRAIN_CONTROL_API_KEY", raising=False)
+    monkeypatch.delenv("BRAIN_CONTROL_NO_AUTH", raising=False)
+
+    sig = inspect.signature(create_control_plane_app)
+    kwargs: dict[str, Any] = {}
+    if "db_path" in sig.parameters:
+        kwargs["db_path"] = db_file
+    app = create_control_plane_app(**kwargs)
+
+    with TestClient(app) as client:
+        # 1. Fail-closed: без ключа и без явного opt-out — 503
+        r = client.get("/v1/profile")
+        assert r.status_code == 503, f"fail-open auth: {r.status_code}"
+        monkeypatch.setenv("BRAIN_CONTROL_NO_AUTH", "1")
+        r = client.get("/v1/profile")
+        assert r.status_code == 200
+        monkeypatch.delenv("BRAIN_CONTROL_NO_AUTH", raising=False)
+
+        # 2. Длинный scope_id — явный 422 вместо молчаливой обрезки
+        r = client.get("/neuro-studio/api/live/" + "x" * 65)
+        assert r.status_code == 422
+        r = client.get("/neuro-studio/api/live/" + "x" * 64)
+        assert r.status_code == 200
+
+        # 3. Мягкий фильтр stimuli: мусорное значение отфильтровано, импульс проходит
+        r = client.post(
+            "/neuro-studio/api/sandbox-pulse",
+            json={
+                "scope_id": "demo:sandbox",
+                "action": "pulse",
+                "stimuli": {"sensor_curiosity": 0.5, "junk": "not-a-number"},
+            },
+        )
+        assert r.status_code == 200, f"junk stimulus rejected the whole request: {r.status_code}"
+        assert r.json()["snapshot"]["pulse_seq"] == 1
+
+
 @pytest.mark.asyncio
 async def test_concurrent_multi_engine_pulses_preserve_pulse_seq(tmp_path: Path) -> None:
     """Регрессия межинстансной RMW-гонки: продакшен-форма live_synaptic_bridge.
