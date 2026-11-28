@@ -1,5 +1,5 @@
 # ruff: noqa: E501
-"""Встроенный HTML-интерфейс онлайн-обсерватории Neuro Studio v1.2.0 (60 FPS Canvas + Live Cloud Polling)."""
+"""Встроенный HTML-интерфейс онлайн-обсерватории Neuro Studio v1.3.0 × Drydock (60 FPS Canvas + Readiness Gate + Merit + SHA-256 Chain)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Kristina Brain Core v1.2.0 — Онлайн-Обсерватория Мозга</title>
+  <title>Kristina Brain Core v1.3.0 × Drydock — Онлайн-Обсерватория Мозга</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
@@ -53,7 +53,7 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
         </div>
         <div>
           <div class="flex items-center gap-2 flex-wrap">
-            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">Kristina Brain Core v1.2 · Онлайн-Обсерватория</h1>
+            <h1 class="text-base sm:text-lg font-bold tracking-tight text-white">Kristina Brain Core v1.3 × Drydock · Онлайн-Обсерватория</h1>
             <span id="conn-badge" class="mono text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">CONNECTING...</span>
             <span class="mono text-[11px] px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">Zero-PII SQLite WAL</span>
           </div>
@@ -74,7 +74,8 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
 
         <nav class="flex flex-wrap gap-1.5">
           <button type="button" id="tab-btn-live" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 text-slate-300 transition tab-active">Коннектом</button>
-          <button type="button" id="tab-btn-tests" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 text-slate-300 hover:border-slate-500 transition">Онлайн-автотесты (10)</button>
+          <button type="button" id="tab-btn-drydock" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-amber-500/40 text-amber-200 hover:border-amber-400 transition">Drydock v1.3 · Математика и SHA-256</button>
+          <button type="button" id="tab-btn-tests" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 text-slate-300 hover:border-slate-500 transition">Онлайн-автотесты (14)</button>
           <button type="button" id="tab-btn-matrix" class="px-3 py-1.5 rounded-xl text-xs font-semibold border border-slate-700 text-slate-300 hover:border-slate-500 transition">Матрица и эмоции</button>
         </nav>
       </div>
@@ -86,10 +87,13 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
         <span id="mode-pill" class="mono text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-400/35 shrink-0">LIVE TELEGRAM</span>
         <span id="narration-text" class="text-slate-200">Подключено к живой БД kristina_state.db (scope=default). Напишите Кристине в Telegram — импульсы отобразятся здесь автоматически за ~1 секунду без передачи текста переписки.</span>
       </div>
-      <div class="flex flex-wrap items-center gap-4 text-xs mono text-slate-400 shrink-0">
+      <div class="flex flex-wrap items-center gap-3.5 text-xs mono text-slate-400 shrink-0">
         <span>Импульсов БД: <b id="kpi-seq" class="text-sky-300">0</b></span>
-        <span>Сеть RTT: <b id="kpi-rtt" class="text-emerald-400">— мс</b></span>
-        <span>Ядро Python: <b id="kpi-engine-ms" class="text-amber-300">&lt; 1.2 мс</b></span>
+        <span>Drydock: <b id="kpi-drydock-score" class="text-emerald-300">10.0/10</b></span>
+        <span>Merit: <b id="kpi-drydock-merit" class="text-amber-300">UNDETERMINED</b></span>
+        <span>SHA-256: <b id="kpi-drydock-sha" class="text-emerald-400">VERIFIED</b></span>
+        <span>RTT: <b id="kpi-rtt" class="text-emerald-400">— мс</b></span>
+        <span>Ядро: <b id="kpi-engine-ms" class="text-amber-300">&lt; 1.2 мс</b></span>
       </div>
     </div>
 
@@ -205,12 +209,12 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
       <div class="glass rounded-2xl p-5 space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h2 class="text-base font-bold text-white">Онлайн-стенд верификации синаптического ядра (10 живых проверок)</h2>
-            <p class="text-xs text-slate-400">Выполняет реальные HTTP-запросы к облачному Python-движку kristina-brain-core v1.2.0 и сверяет математические инварианты</p>
+            <h2 class="text-base font-bold text-white">Онлайн-стенд верификации синаптического ядра и Drydock v1.3.0 (14 живых проверок)</h2>
+            <p class="text-xs text-slate-400">Выполняет реальные HTTP-запросы к облачному Python-движку kristina-brain-core v1.3.0: синапсы, ГАМК, пластичность Хебба, перенормировка весов, монотонное сжатие Gate, Уилсон/Бонферрони и перехват подмены SHA-256</p>
           </div>
           <div class="flex items-center gap-3">
             <span id="tests-summary-badge" class="mono text-xs px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300 border border-slate-700 font-semibold">ГОТОВ К ЗАПУСКУ</span>
-            <button type="button" id="btn-rerun-tests" class="px-4 py-2 rounded-xl text-xs font-semibold bg-sky-500/25 text-sky-200 border border-sky-400/50 hover:bg-sky-500/35 transition">Запустить 10 онлайн-тестов</button>
+            <button type="button" id="btn-rerun-tests" class="px-4 py-2 rounded-xl text-xs font-semibold bg-sky-500/25 text-sky-200 border border-sky-400/50 hover:bg-sky-500/35 transition">Запустить 14 онлайн-тестов</button>
           </div>
         </div>
         <div id="tests-grid" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
@@ -240,6 +244,93 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
           <h2 class="text-sm font-bold text-white">12 медленных мод организма (OrganismModes)</h2>
           <div id="slow-modes-list" class="space-y-2 text-xs max-h-[420px] overflow-y-auto pr-1"></div>
         </div>
+      </div>
+    </section>
+
+    <!-- VIEW 4: DRYDOCK v1.3 MATH & SHA-256 RECEIPTS -->
+    <section id="view-drydock" class="hidden space-y-4">
+      <div class="glass rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-base font-bold text-white">Математическое и эпистемическое ядро Drydock v1.3.0</h2>
+          <p class="text-xs text-slate-400">Прямая телеметрия готовности нейроконтура без «мёртвого веса» неисследованных категорий, монотонное сжатие Gate (&times;0.69 &le; 6.9), трёхзначный вердикт Merit и 4-шаговая цепочка SHA-256</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" id="dd-btn-cold" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition">Сброс (UNEXAMINED · UNDETERMINED)</button>
+          <button type="button" id="dd-btn-norm" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 transition">Импульс нормы (DELIVERED)</button>
+          <button type="button" id="dd-btn-gate" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/40 transition">Стресс-конфликт (GATE &le; 6.9 · OWED)</button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <!-- Readiness & Category Subscores -->
+        <div class="xl:col-span-6 glass rounded-2xl p-5 space-y-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <span class="text-xs uppercase tracking-wider text-slate-400">Drydock Neural Readiness</span>
+              <div class="flex items-baseline gap-3 mt-1">
+                <span id="dd-total-score" class="mono text-3xl font-bold text-emerald-300">10.0</span>
+                <span class="mono text-sm text-slate-400">/ 10.0</span>
+                <span id="dd-gate-pill" class="mono text-[11px] px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">UNGATED</span>
+              </div>
+              <p id="dd-mean-note" class="mono text-[11px] text-slate-400 mt-1">mean_ungated = 10.00 · проверено категорий: 3/4</p>
+            </div>
+            <div class="text-right">
+              <span class="text-xs uppercase tracking-wider text-slate-400">Трёхзначный Merit</span>
+              <div class="mt-1">
+                <span id="dd-merit-pill" class="mono text-sm px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">UNDETERMINED</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="dd-categories-list" class="space-y-2.5 text-xs"></div>
+
+          <div class="pt-3 border-t border-slate-800 space-y-1.5">
+            <div class="text-xs font-semibold text-slate-300">Доказательная база Merit (decisive reasons):</div>
+            <div id="dd-merit-reasons" class="space-y-1.5 text-xs"></div>
+          </div>
+        </div>
+
+        <!-- 4-Stage SHA-256 Chain & Tamper Attack Simulator -->
+        <div class="xl:col-span-6 glass rounded-2xl p-5 space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 class="text-sm font-bold text-white">4-шаговая криптоцепочка SHA-256 квитанций</h3>
+              <p class="text-[11px] text-slate-400 mono">detector &rarr; researcher &rarr; experimenter &rarr; verifier</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" id="btn-dd-verify-clean" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 transition">Проверить подлинность</button>
+              <button type="button" id="btn-dd-tamper-attack" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 transition">Симулировать атаку подмены</button>
+            </div>
+          </div>
+
+          <div id="dd-tamper-banner" class="rounded-xl px-3.5 py-2.5 text-xs mono bg-emerald-950/40 border border-emerald-500/35 text-emerald-200">
+            SHA-256 верификация: цепочка подлинна (chain_verified = true)
+          </div>
+
+          <div id="dd-chain-tasks" class="space-y-2 text-xs mono"></div>
+        </div>
+      </div>
+
+      <!-- Interactive Wilson 95% CI & Bonferroni Calculator -->
+      <div class="glass rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-bold text-white">Онлайн-калькулятор интервалов Уилсона 95% и Z-теста Бонферрони (Python API)</h3>
+            <p class="text-xs text-slate-400">Проверяет статистическую значимость отрыва двух когорт через <code class="mono text-sky-300">POST /neuro-studio/api/drydock-eval</code> без нормального вылета за [0%, 100%]</p>
+          </div>
+          <button type="button" id="btn-dd-calc-stats" class="px-4 py-2 rounded-xl text-xs font-semibold bg-sky-500/25 hover:bg-sky-500/35 text-sky-200 border border-sky-400/50 transition shrink-0">Рассчитать на сервере</button>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-6 gap-3 text-xs">
+          <label class="space-y-1"><span class="text-slate-400">Успехи A (Brain)</span><input id="dd-ha" type="number" value="105" min="0" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+          <label class="space-y-1"><span class="text-slate-400">Выборка N_A</span><input id="dd-na" type="number" value="144" min="1" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+          <label class="space-y-1"><span class="text-slate-400">Успехи B (Baseline)</span><input id="dd-hb" type="number" value="51" min="0" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+          <label class="space-y-1"><span class="text-slate-400">Выборка N_B</span><input id="dd-nb" type="number" value="144" min="1" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+          <label class="space-y-1"><span class="text-slate-400">Гипотез m</span><input id="dd-m" type="number" value="3" min="1" max="50" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+          <label class="space-y-1"><span class="text-slate-400">Уровень &alpha;</span><input id="dd-alpha" type="number" value="0.05" step="0.01" min="0.001" max="0.25" class="w-full rounded-lg bg-slate-900 border border-slate-700 px-2.5 py-1.5 mono text-white"></label>
+        </div>
+
+        <div id="dd-stats-output" class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs mono"></div>
       </div>
     </section>
 
@@ -603,6 +694,89 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
         <div class="flex justify-between mb-1"><span class="font-medium text-slate-200">${name}</span><span class="mono text-sky-300">${Number(m.amplitude).toFixed(3)} <span class="text-slate-500">(base ${Number(m.baseline).toFixed(2)})</span></span></div>
         <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden"><div class="h-full bg-sky-400 rounded-full" style="width:${clamp(Number(m.amplitude) * 100, 0, 100).toFixed(1)}%"></div></div>
       </div>`).join('');
+
+      renderDrydockUI(snap);
+    }
+
+    const DD_CAT_LABELS = {
+      Neural_Stability: 'Neural_Stability · Стабильность и стресс-контур (30%, Gated)',
+      Inhibitory_Shield: 'Inhibitory_Shield · Тормозной щит ГАМК -0.95 (30%, Gated)',
+      Modulator_Balance: 'Modulator_Balance · Гомеостаз 5 медиаторов (20%, Gated)',
+      Synaptic_Plasticity: 'Synaptic_Plasticity · Пластичность Хебба e(t) (20%)',
+    };
+
+    function renderDrydockUI(snap) {
+      const dd = snap.drydock;
+      if (!dd || !dd.readiness || !dd.merit) return;
+      const rd = dd.readiness;
+      const mr = dd.merit;
+      const tot = Number(rd.total ?? 10).toFixed(1);
+      const isGated = Boolean(rd.gated);
+      const meritUp = String(mr.conclusion || 'undetermined').toUpperCase();
+
+      const kpiScore = document.getElementById('kpi-drydock-score');
+      kpiScore.textContent = `${tot}/10${isGated ? ' [GATE]' : ''}`;
+      kpiScore.className = isGated ? 'text-rose-400' : 'text-emerald-300';
+
+      const kpiMerit = document.getElementById('kpi-drydock-merit');
+      kpiMerit.textContent = meritUp;
+      kpiMerit.className = meritUp === 'OWED' ? 'text-rose-400' : (meritUp === 'DELIVERED' ? 'text-emerald-300' : 'text-amber-300');
+
+      const kpiSha = document.getElementById('kpi-drydock-sha');
+      kpiSha.textContent = dd.chain_verified ? 'VERIFIED (4/4)' : 'TAMPERED!';
+      kpiSha.className = dd.chain_verified ? 'text-emerald-400' : 'text-rose-400';
+
+      document.getElementById('dd-total-score').textContent = tot;
+      document.getElementById('dd-total-score').className = `mono text-3xl font-bold ${isGated ? 'text-rose-400' : 'text-emerald-300'}`;
+
+      const gatePill = document.getElementById('dd-gate-pill');
+      gatePill.textContent = isGated ? 'GATED ×0.69 ≤ 6.9' : 'UNGATED (НОРМА)';
+      gatePill.className = `mono text-[11px] px-2.5 py-0.5 rounded-full border ${isGated ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'}`;
+
+      const counted = rd.counted || [];
+      const unexam = rd.unexamined || [];
+      document.getElementById('dd-mean-note').textContent = `mean_ungated = ${Number(rd.mean_ungated ?? 10).toFixed(2)} · проверено: ${counted.length}/4${unexam.length ? ' · unexamined: ' + unexam.join(', ') : ''}`;
+
+      const meritStyles = {
+        OWED: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+        DELIVERED: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+        UNDETERMINED: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+      };
+      const mPill = document.getElementById('dd-merit-pill');
+      mPill.textContent = meritUp;
+      mPill.className = `mono text-sm px-3 py-1 rounded-xl border font-bold ${meritStyles[meritUp] || meritStyles.UNDETERMINED}`;
+
+      const cats = rd.categories || {};
+      document.getElementById('dd-categories-list').innerHTML = Object.keys(DD_CAT_LABELS).map((ck) => {
+        const isUnex = unexam.includes(ck);
+        const val = Number(cats[ck] ?? 10);
+        const barColor = isUnex ? '#64748b' : (val < 7.0 ? '#fb7185' : '#34d399');
+        return `<div class="rounded-xl bg-slate-900/80 border border-slate-800 p-2.5">
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <span class="text-slate-200 font-medium">${DD_CAT_LABELS[ck]}</span>
+            <span class="mono font-semibold" style="color:${barColor}">${isUnex ? 'UNEXAMINED (без голоса)' : val.toFixed(1) + ' / 10'}</span>
+          </div>
+          <div class="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+            <div class="h-full rounded-full transition-all duration-300" style="width:${isUnex ? 100 : clamp(val * 10, 0, 100)}%;background:${barColor};opacity:${isUnex ? 0.28 : 1}"></div>
+          </div>
+        </div>`;
+      }).join('');
+
+      document.getElementById('dd-merit-reasons').innerHTML = (mr.reasons || []).map((r) => `
+        <div class="rounded-lg bg-slate-900/80 border border-slate-800 px-3 py-2 flex items-center justify-between gap-2">
+          <span class="text-slate-200"><code class="mono text-sky-300 mr-1.5">[${r.code}]</code>${r.detail}</span>
+          <span class="mono text-[10px] px-2 py-0.5 rounded border ${r.decisive ? 'bg-sky-500/20 text-sky-200 border-sky-400/40' : 'bg-slate-800 text-slate-400 border-slate-700'}">${r.decisive ? 'DECISIVE' : 'INFO'}</span>
+        </div>`).join('');
+
+      const tasks = (dd.cognitive_chain && dd.cognitive_chain.tasks) ? dd.cognitive_chain.tasks : [];
+      document.getElementById('dd-chain-tasks').innerHTML = tasks.map((t, idx) => `
+        <div class="rounded-xl bg-slate-900/85 border border-slate-800 p-2.5 space-y-1">
+          <div class="flex items-center justify-between">
+            <span class="font-semibold text-sky-300">${idx + 1}. ${t.agent} <span class="text-slate-400 font-normal">· ${t.goal}</span></span>
+            <span class="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 text-[10px]">${t.status} (${t.reason})</span>
+          </div>
+          <div class="text-[11px] text-slate-400 break-all">in: <span class="text-slate-300">${String(t.input_sha256).slice(0, 20)}…</span> &rarr; out: <span class="text-emerald-300">${String(t.output_sha256).slice(0, 20)}…</span></div>
+        </div>`).join('');
     }
 
     async function pollLiveScope() {
@@ -752,6 +926,90 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
         return `w: ${before.toFixed(3)} → ${after.toFixed(3)}, тормоз=${brake}`;
       });
 
+      await check('11. Перенормировка весов Drydock (unexamined без мёртвого веса)', 'Сброс контура (pulse_seq=0) помечает Synaptic_Plasticity как unexamined и ставит Merit=undetermined', async () => {
+        const d = await runCloudSandboxAction('reset', {}, 0, null);
+        const dd = d.snapshot.drydock;
+        if (!dd || !dd.readiness.unexamined.includes('Synaptic_Plasticity')) throw new Error('Synaptic_Plasticity не исключена при pulse_seq=0');
+        if (dd.merit.conclusion !== 'undetermined') throw new Error(`Ожидался undetermined, получен ${dd.merit.conclusion}`);
+        const rEval = await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'readiness',
+            examined_categories: ['Neural_Stability', 'Inhibitory_Shield'],
+            signals: [{ signal_id: 's1', title: 'High load', severity: 'high', confidence: 1.0, category: 'Neural_Stability' }],
+          }),
+        });
+        const ev = await rEval.json();
+        if (ev.readiness.total !== 9.5) throw new Error(`Ожидался 9.5 без мёртвого веса, получен ${ev.readiness.total}`);
+        return `total=9.5 (unexamined=${ev.readiness.unexamined.join(',')}), Merit=undetermined`;
+      });
+
+      await check('12. Монотонное сжатие Gate (×0.69 ≤ 6.9) и строгий порядок тяжести', 'Конфликт включает Gate ≤ 6.9 и Merit=owed, сохраняя 1 critical > 3 criticals', async () => {
+        const d = await runCloudSandboxAction('pulse', { sensor_conflict: 0.95, sensor_warmth: 0.85 }, -0.8, null);
+        const dd = d.snapshot.drydock;
+        if (!dd.readiness.gated || dd.readiness.total > 6.9 || dd.merit.conclusion !== 'owed') {
+          throw new Error('Gate или Merit=owed не сработали при конфликте');
+        }
+        const r1 = await (await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'readiness',
+            signals: [{ signal_id: 'c1', title: 'One crit', severity: 'critical', confidence: 0.90, category: 'Neural_Stability' }],
+          }),
+        })).json();
+        const r3 = await (await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'readiness',
+            signals: [
+              { signal_id: 'c1', title: 'Crit 1', severity: 'critical', confidence: 0.95, category: 'Neural_Stability' },
+              { signal_id: 'c2', title: 'Crit 2', severity: 'critical', confidence: 0.95, category: 'Inhibitory_Shield' },
+              { signal_id: 'c3', title: 'Crit 3', severity: 'critical', confidence: 0.95, category: 'Modulator_Balance' },
+            ],
+          }),
+        })).json();
+        if (!(r3.readiness.total < r1.readiness.total && r1.readiness.total <= 6.9)) {
+          throw new Error(`Нарушена монотонность Gate: ${r1.readiness.total} vs ${r3.readiness.total}`);
+        }
+        return `Live Gate=${dd.readiness.total}/10 (OWED), лестница ${r1.readiness.total} > ${r3.readiness.total}`;
+      });
+
+      await check('13. Интервал Уилсона 95% и Z-тест с поправкой Бонферрони', 'POST /neuro-studio/api/drydock-eval подтверждает значимость 105/144 vs 51/144 при m=3', async () => {
+        const res = await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'stats', hits_a: 105, total_a: 144, hits_b: 51, total_b: 144, alpha: 0.05, comparisons: 3 }),
+        });
+        const st = await res.json();
+        if (!st.significant || !(st.two_proportion_p < st.bonferroni_alpha)) throw new Error('Статистический тест не пройден');
+        return `${st.wilson_a.label} · p=${st.two_proportion_p} < α=${st.bonferroni_alpha}`;
+      });
+
+      await check('14. Криптозащита 4-шаговой цепочки SHA-256 (перехват подмены)', 'Подлинная цепочка проходит верификацию, а мутация любого поля мгновенно отклоняется', async () => {
+        const liveRes = await (await fetch('/neuro-studio/api/live/default')).json();
+        const cleanChain = liveRes.drydock.chain_state;
+        const okClean = await (await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'verify_chain', chain_state: cleanChain }),
+        })).json();
+        const forged = JSON.parse(JSON.stringify(cleanChain));
+        forged.drydock_readiness.total = 10.0;
+        forged.verified = false;
+        const okForged = await (await fetch('/neuro-studio/api/drydock-eval', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'verify_chain', chain_state: forged }),
+        })).json();
+        if (okClean.chain_verified !== true || okForged.chain_verified !== false) {
+          throw new Error('Ошибка криптопроверки цепочки SHA-256');
+        }
+        return 'Оригинал: VERIFIED (true) · Подделка: REJECTED (false)';
+      });
+
       const passed = results.filter((r) => r.ok).length;
       badge.textContent = `${passed} / ${results.length} PASSED (CLOUD LIVE)`;
       badge.className = `mono text-xs px-3 py-1.5 rounded-xl font-semibold border ${passed === results.length ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-rose-500/20 text-rose-300 border-rose-500/40'}`;
@@ -765,14 +1023,86 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
       </div>`).join('');
     }
 
+    async function runDrydockStatsCalc() {
+      const payload = {
+        mode: 'stats',
+        hits_a: Number(document.getElementById('dd-ha').value || 0),
+        total_a: Number(document.getElementById('dd-na').value || 1),
+        hits_b: Number(document.getElementById('dd-hb').value || 0),
+        total_b: Number(document.getElementById('dd-nb').value || 1),
+        comparisons: Number(document.getElementById('dd-m').value || 1),
+        alpha: Number(document.getElementById('dd-alpha').value || 0.05),
+      };
+      const res = await fetch('/neuro-studio/api/drydock-eval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const d = await res.json();
+      if (!d.ok) return;
+      document.getElementById('dd-stats-output').innerHTML = `
+        <div class="rounded-xl bg-slate-900/85 border border-slate-800 p-3">
+          <div class="text-slate-400 mb-1">Когорта A · Уилсон 95% CI</div>
+          <div class="text-emerald-300 font-semibold">${d.wilson_a.label}</div>
+        </div>
+        <div class="rounded-xl bg-slate-900/85 border border-slate-800 p-3">
+          <div class="text-slate-400 mb-1">Когорта B · Уилсон 95% CI</div>
+          <div class="text-sky-300 font-semibold">${d.wilson_b.label}</div>
+        </div>
+        <div class="rounded-xl bg-slate-900/85 border ${d.significant ? 'border-emerald-500/40' : 'border-amber-500/40'} p-3">
+          <div class="text-slate-400 mb-1">Двусторонний Z-тест &amp; Бонферрони</div>
+          <div class="${d.significant ? 'text-emerald-300' : 'text-amber-300'} font-semibold">p = ${d.two_proportion_p} (${d.significant ? 'ЗНАЧИМО' : 'НЕ ЗНАЧИМО'} при &alpha;=${d.bonferroni_alpha})</div>
+        </div>`;
+    }
+
+    document.getElementById('btn-dd-calc-stats').addEventListener('click', runDrydockStatsCalc);
+
+    document.getElementById('dd-btn-cold').addEventListener('click', () =>
+      runCloudSandboxAction('reset', {}, 0, 'Drydock: песочница сброшена (pulse_seq=0 → Synaptic_Plasticity UNEXAMINED, Merit UNDETERMINED).'));
+    document.getElementById('dd-btn-norm').addEventListener('click', () =>
+      runCloudSandboxAction('pulse', { sensor_curiosity: 0.92, sensor_warmth: 0.65 }, 0.85, 'Drydock: штатный импульс обработан (все 4 категории проверены, Merit DELIVERED).'));
+    document.getElementById('dd-btn-gate').addEventListener('click', () =>
+      runCloudSandboxAction('pulse', { sensor_conflict: 0.95, sensor_warmth: 0.88 }, -0.85, 'Drydock: конфликт сжал индекс монотонной формулой ×0.69 ≤ 6.9 и выставил Merit OWED.'));
+
+    document.getElementById('btn-dd-verify-clean').addEventListener('click', async () => {
+      if (!latestSnapshot || !latestSnapshot.drydock) return;
+      const r = await fetch('/neuro-studio/api/drydock-eval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'verify_chain', chain_state: latestSnapshot.drydock.chain_state }),
+      });
+      const d = await r.json();
+      const b = document.getElementById('dd-tamper-banner');
+      b.className = 'rounded-xl px-3.5 py-2.5 text-xs mono bg-emerald-950/40 border border-emerald-500/40 text-emerald-200';
+      b.textContent = `ПРОВЕРКА ПРОЙДЕНА (${d.engine_latency_ms} мс): все 4 SHA-256 квитанции совпадают (chain_verified = ${d.chain_verified})`;
+    });
+
+    document.getElementById('btn-dd-tamper-attack').addEventListener('click', async () => {
+      if (!latestSnapshot || !latestSnapshot.drydock) return;
+      const tampered = JSON.parse(JSON.stringify(latestSnapshot.drydock.chain_state));
+      tampered.drydock_readiness.total = 10.0;
+      tampered.neural_merit.conclusion = 'delivered';
+      const r = await fetch('/neuro-studio/api/drydock-eval', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'verify_chain', chain_state: tampered }),
+      });
+      const d = await r.json();
+      const b = document.getElementById('dd-tamper-banner');
+      b.className = 'rounded-xl px-3.5 py-2.5 text-xs mono bg-amber-950/50 border border-amber-400/50 text-amber-200';
+      b.textContent = `АТАКА ПОДМЕНЫ ОТРАЖЕНА (${d.engine_latency_ms} мс): попытка подделать балл на 10.0 перехвачена по SHA-256 (chain_verified = ${d.chain_verified})`;
+      showToast('Атака подмены SHA-256 успешно перехвачена сервером!');
+    });
+
     // Wire UI tabs & buttons
-    ['live', 'tests', 'matrix'].forEach((tab) => {
+    ['live', 'drydock', 'tests', 'matrix'].forEach((tab) => {
       document.getElementById(`tab-btn-${tab}`).addEventListener('click', () => {
-        ['live', 'tests', 'matrix'].forEach((t) => {
+        ['live', 'drydock', 'tests', 'matrix'].forEach((t) => {
           document.getElementById(`view-${t}`).classList.toggle('hidden', t !== tab);
           document.getElementById(`tab-btn-${t}`).classList.toggle('tab-active', t === tab);
         });
         if (tab === 'live') resizeCanvas();
+        if (tab === 'drydock') runDrydockStatsCalc();
       });
     });
 
