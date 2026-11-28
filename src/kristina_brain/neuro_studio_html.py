@@ -997,7 +997,7 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
           body: JSON.stringify({ mode: 'verify_chain', chain_state: cleanChain }),
         })).json();
         const forged = JSON.parse(JSON.stringify(cleanChain));
-        forged.drydock_readiness.total = 10.0;
+        forged.drydock_readiness.total = Number(forged.drydock_readiness.total) >= 9.9 ? 4.2 : 10.0;
         forged.verified = false;
         const okForged = await (await fetch('/neuro-studio/api/drydock-eval', {
           method: 'POST',
@@ -1005,7 +1005,7 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
           body: JSON.stringify({ mode: 'verify_chain', chain_state: forged }),
         })).json();
         if (okClean.chain_verified !== true || okForged.chain_verified !== false) {
-          throw new Error('Ошибка криптопроверки цепочки SHA-256');
+          throw new Error(`clean=${okClean.chain_verified}, forged=${okForged.chain_verified}`);
         }
         return 'Оригинал: VERIFIED (true) · Подделка: REJECTED (false)';
       });
@@ -1080,8 +1080,8 @@ NEURO_STUDIO_HTML: str = """<!DOCTYPE html>
     document.getElementById('btn-dd-tamper-attack').addEventListener('click', async () => {
       if (!latestSnapshot || !latestSnapshot.drydock) return;
       const tampered = JSON.parse(JSON.stringify(latestSnapshot.drydock.chain_state));
-      tampered.drydock_readiness.total = 10.0;
-      tampered.neural_merit.conclusion = 'delivered';
+      tampered.drydock_readiness.total = Number(tampered.drydock_readiness.total) >= 9.9 ? 4.2 : 10.0;
+      tampered.neural_merit.conclusion = tampered.neural_merit.conclusion === 'owed' ? 'delivered' : 'owed';
       const r = await fetch('/neuro-studio/api/drydock-eval', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -79,3 +79,51 @@ def test_chain_verification() -> None:
     bad = deepcopy(res)
     bad["step"] = 99
     assert verify_cognitive_chain(bad, binding=binding, goals=goals) is False
+
+
+def test_js_float_to_int_roundtrip_preserves_chain_sha256() -> None:
+    """Имитирует браузерный JSON.stringify (где 10.0 превращается в 10)."""
+    binding = {"scope_id": "default", "pulse_seq": 42}
+    goals: dict[ChainRole, str] = {
+        "detector": "d",
+        "researcher": "r",
+        "experimenter": "e",
+        "verifier": "v",
+    }
+    allowed: dict[ChainRole, set[str]] = {
+        "detector": {"score"},
+        "researcher": {"score"},
+        "experimenter": {"score"},
+        "verifier": {"ok"},
+    }
+
+    def w_score(st: dict[str, Any]) -> WorkerResult:
+        st["score"] = 10.0
+        return st, "completed", "ok"
+
+    def w_ver(st: dict[str, Any]) -> WorkerResult:
+        st["ok"] = True
+        return st, "completed", "sealed"
+
+    state = run_cognitive_chain(
+        {"scope_id": "default", "score": 0.0, "ok": False},
+        binding=binding,
+        workers={
+            "detector": w_score,
+            "researcher": w_score,
+            "experimenter": w_score,
+            "verifier": w_ver,
+        },
+        allowed_fields=allowed,
+        goals=goals,
+    )
+    # Simulate browser JSON.stringify turning 10.0 (float) into 10 (int)
+    js_roundtripped = deepcopy(state)
+    js_roundtripped["score"] = 10
+    assert verify_cognitive_chain(js_roundtripped, binding=binding, goals=goals) is True
+
+    # Any real mutation (10 -> 9.9 or ok -> False) is still strictly rejected
+    tampered = deepcopy(js_roundtripped)
+    tampered["score"] = 9.9
+    assert verify_cognitive_chain(tampered, binding=binding, goals=goals) is False
+

@@ -269,10 +269,27 @@ def bonferroni_threshold(alpha: float = 0.05, comparisons: int = 1) -> float:
     return round(alpha / max(1, int(comparisons)), 6)
 
 
+def _jcs_normalize(value: Any) -> Any:
+    """Нормализует целые float (10.0 -> 10) по RFC 8785 для совместимости с JS JSON."""
+    if isinstance(value, bool) or value is None or isinstance(value, str):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("Non-finite float is forbidden in canonical JSON")
+        return int(value) if value.is_integer() else value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Mapping):
+        return {str(k): _jcs_normalize(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jcs_normalize(v) for v in value]
+    return value
+
+
 def canonical_digest(value: Any) -> str:
-    """Детерминированный SHA-256 канонического JSON без NaN."""
+    """Детерминированный SHA-256 канонического JSON без NaN (RFC 8785 JS-safe)."""
     encoded = json.dumps(
-        value,
+        _jcs_normalize(value),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=True,
